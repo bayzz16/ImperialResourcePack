@@ -1,0 +1,12 @@
+name: ImperialResourcePack
+version: 1.0.0
+main: id.imperial.resourcepack.paper.ImperialResourcePackPaper
+api-version: '1.21'
+author: bayzz16
+commands:
+  irp:
+    description: ImperialResourcePack administration
+    permission: imperialresourcepack.admin
+permissions:
+  imperialresourcepack.admin:
+    default: op
