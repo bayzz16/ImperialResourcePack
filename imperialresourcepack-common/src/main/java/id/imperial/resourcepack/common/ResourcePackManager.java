@@ -76,12 +76,89 @@ public final class ResourcePackManager {
     } catch (IOException e) { return List.of(); }
   }
 
+  /**
+   * Finds a pack for a client version.
+   *
+   * <p>Supported names are both the original exact-version form
+   * {@code ResourcePack-1.21.8.zip} and inclusive ranges such as
+   * {@code ResourcePack-Java_1.21.6-1.21.8.zip}. Exact matches win over
+   * ranges. Range matching is numeric, so 1.21.10 correctly sorts after
+   * 1.21.9.</p>
+   */
   public Path versionPack(Path directory, String version) {
     if (version == null || version.isBlank()) return null;
     Path root = directory.toAbsolutePath().normalize();
-    Path candidate = directory.resolve("ResourcePack-" + version + ".zip").normalize();
-    return candidate.getParent() != null && candidate.getParent().toAbsolutePath().normalize().equals(root)
-        && Files.isRegularFile(candidate) ? candidate : null;
+
+    Path exact = safeChild(directory, "ResourcePack-" + version + ".zip");
+    if (exact != null && Files.isRegularFile(exact)) return exact;
+
+    MinecraftVersion requested = MinecraftVersion.parse(version);
+    if (requested == null) return null;
+
+    try {
+      List<VersionRangePack> matches = new ArrayList<>();
+      for (Path file : listZipFiles(directory)) {
+        VersionRangePack range = VersionRangePack.parse(file);
+        if (range != null && range.contains(requested)) matches.add(range);
+      }
+      return matches.stream()
+          .sorted(Comparator.comparingLong(VersionRangePack::span)
+              .thenComparing(r -> r.file().getFileName().toString()))
+          .map(VersionRangePack::file)
+          .findFirst()
+          .orElse(null);
+    } catch (IOException e) {
+      logger.warning("[ImperialResourcePack] Cannot scan version-mapped packs: " + e.getMessage());
+      return null;
+    }
+  }
+
+  private record MinecraftVersion(int major, int minor, int patch) implements Comparable<MinecraftVersion> {
+    static MinecraftVersion parse(String value) {
+      String[] parts = value.trim().split("\\.");
+      if (parts.length < 2 || parts.length > 3) return null;
+      try {
+        int major = Integer.parseInt(parts[0]);
+        int minor = Integer.parseInt(parts[1]);
+        int patch = parts.length == 3 ? Integer.parseInt(parts[2]) : 0;
+        if (major < 0 || minor < 0 || patch < 0) return null;
+        return new MinecraftVersion(major, minor, patch);
+      } catch (NumberFormatException e) {
+        return null;
+      }
+    }
+
+    @Override public int compareTo(MinecraftVersion other) {
+      int c = Integer.compare(major, other.major);
+      if (c != 0) return c;
+      c = Integer.compare(minor, other.minor);
+      return c != 0 ? c : Integer.compare(patch, other.patch);
+    }
+  }
+
+  private record VersionRangePack(Path file, MinecraftVersion start, MinecraftVersion end) {
+    private static final java.util.regex.Pattern RANGE = java.util.regex.Pattern.compile(
+        "^ResourcePack(?:-[^_]+)?_(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?)\\.zip$",
+        java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    static VersionRangePack parse(Path file) {
+      var matcher = RANGE.matcher(file.getFileName().toString());
+      if (!matcher.matches()) return null;
+      MinecraftVersion start = MinecraftVersion.parse(matcher.group(1));
+      MinecraftVersion end = MinecraftVersion.parse(matcher.group(2));
+      if (start == null || end == null || start.compareTo(end) > 0) return null;
+      return new VersionRangePack(file, start, end);
+    }
+
+    boolean contains(MinecraftVersion version) {
+      return start.compareTo(version) <= 0 && end.compareTo(version) >= 0;
+    }
+
+    long span() {
+      return ((long) end.major() - start.major()) * 1_000_000L
+          + ((long) end.minor() - start.minor()) * 1_000L
+          + end.patch() - start.patch();
+    }
   }
 
   public ResourcePackValidator.ValidationResult validate(Path file, ResourcePackConfig config) {
