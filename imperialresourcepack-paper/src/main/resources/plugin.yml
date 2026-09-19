@@ -5,9 +5,9 @@ api-version: '1.21'
 author: bayzz16
 commands:
   irp:
-    description: ImperialResourcePack administration: list, use, info, reload and validate
-    usage: /irp <list|use <file>|info|reload|validate>
-    permission: imperialresourcepack.admin
+    description: "ImperialResourcePack administration: list, use, info, reload and validate"
+    usage: "/irp <list|use <file>|info|reload|validate>"
+    permission: "imperialresourcepack.admin"
 permissions:
   imperialresourcepack.admin:
     default: op
