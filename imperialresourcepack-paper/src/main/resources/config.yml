@@ -1,18 +1,36 @@
 enabled: true
 packs-directory: "packs"
-active-pack: ""
+active-pack: "ResourcePack-Java_PALING-BARU.zip"
+
 delivery:
   enabled: true
   required: false
   prompt: "<gold>Imperial X SOL</gold> <gray>Resource Pack</gray>"
   send-delay-ms: 1500
   resend-on-server-switch: false
+
 hosting:
   enabled: true
   bind: "0.0.0.0"
   port: 8199
   path: "/pack"
   public-url: "http://play.imperial.biz.id/pack"
+
 validation:
   require-pack-mcmeta: true
   max-size-mb: 256
+
+version-mapping: true
+version-mapping-fallback-to-active: true
+
+auto-reload:
+  enabled: true
+  interval-ms: 2000
+
+stats:
+  enabled: true
+
+# Optional named pack profiles.
+# profiles:
+#   default: "ResourcePack-Java_PALING-BARU.zip"
+#   rpg: "ResourcePack-Java_1.21.9-1.21.10.zip"
