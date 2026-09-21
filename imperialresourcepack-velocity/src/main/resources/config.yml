@@ -5,7 +5,7 @@ active-pack: ""
 delivery:
   enabled: true
   required: false
-  prompt: "<gold>Imperial X SOL</gold> <gray>Resource Pack</gray>"
+  prompt: "<gradient:#7C4DFF:#29B6F6><bold>ɪᴍᴘᴇʀɪᴀʟ</bold></gradient> <gray>•</gray> <white>ʀᴇꜱᴏᴜʀᴄᴇ ᴘᴀᴄᴋ</white>
   send-delay-ms: 1500
   resend-on-server-switch: false
 
