@@ -20,12 +20,12 @@ final class PaperCommand implements TabExecutor {
   public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                            @NotNull String label, String[] args) {
     if (!sender.hasPermission(P)) {
-      sender.sendMessage("[IRP] No permission.");
+      sender.sendMessage("§c✦ §fAkses ditolak §8• §7Kamu tidak memiliki izin.");
       return true;
     }
 
     if (args.length == 0) {
-      sender.sendMessage("[IRP] /irp use [file|version] | list | info | reload | validate | status | diagnose | stats | profile");
+      sender.sendMessage("§b✦ §fɪᴍᴘᴇʀɪᴀʟʀᴇꜱᴏᴜʀᴄᴇᴘᴀᴄᴋ §8• §7/irp use|list|info|reload|validate|status|diagnose|stats|profile");
       return true;
     }
 
@@ -33,11 +33,11 @@ final class PaperCommand implements TabExecutor {
       case "list" -> {
         List<Path> all = plugin.manager().listAll(plugin.packsDirectory());
         if (all.isEmpty()) {
-          sender.sendMessage("[IRP] No ZIP files found in packs.");
+          sender.sendMessage("§c✦ §fTidak ada resource pack §8• §7Folder packs kosong.");
           return true;
         }
         Path active = plugin.manager().active() == null ? null : plugin.manager().active().file();
-        sender.sendMessage("[IRP] Packs in folder:");
+        sender.sendMessage("§b✦ §fDaftar Resource Pack");
         for (Path file : all) {
           boolean valid = plugin.manager().validate(file, plugin.config()).valid();
           sender.sendMessage(" - " + file.getFileName()
@@ -66,7 +66,7 @@ final class PaperCommand implements TabExecutor {
       case "diagnose" -> sender.sendMessage("[IRP] " + plugin.diagnoseMessage());
       case "stats" -> sender.sendMessage("[IRP] " + plugin.statsMessage());
       case "profile" -> profile(sender, args);
-      default -> sender.sendMessage("[IRP] Unknown subcommand.");
+      default -> sender.sendMessage("§c✦ §fSubcommand tidak dikenal.");
     }
     return true;
   }
@@ -74,7 +74,7 @@ final class PaperCommand implements TabExecutor {
   private void profile(CommandSender sender, String[] args) {
     if (args.length < 2 || args[1].equalsIgnoreCase("list")) {
       if (plugin.config().profiles().isEmpty()) {
-        sender.sendMessage("[IRP] No profiles configured. Add them under profiles: in config.yml.");
+        sender.sendMessage("§e✦ §fBelum ada profile yang dikonfigurasi.");
         return;
       }
       sender.sendMessage("[IRP] Profiles:");
@@ -84,19 +84,19 @@ final class PaperCommand implements TabExecutor {
 
     if (args[1].equalsIgnoreCase("use")) {
       if (args.length < 3) {
-        sender.sendMessage("[IRP] Usage: /irp profile use <name>");
+        sender.sendMessage("§7Format: §f/irp profile use <name>");
         return;
       }
       String file = plugin.config().profiles().get(args[2]);
       if (file == null) {
-        sender.sendMessage("[IRP] Unknown profile: " + args[2]);
+        sender.sendMessage("§c✦ §fProfile tidak ditemukan: " + args[2]);
         return;
       }
       sender.sendMessage("[IRP] " + plugin.use(file));
       return;
     }
 
-    sender.sendMessage("[IRP] Usage: /irp profile [list|use <name>]");
+    sender.sendMessage("§7Format: §f/irp profile [list|use <name>]");
   }
 
   @Override
