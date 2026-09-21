@@ -59,8 +59,11 @@ public final class ResourcePackHost implements AutoCloseable {
     exchange.getResponseHeaders().set("Content-Type", "application/zip");
     exchange.getResponseHeaders().set("Content-Length", String.valueOf(selected.size()));
     exchange.getResponseHeaders().set("Cache-Control", "public, max-age=31536000, immutable");
-    exchange.getResponseHeaders().set("ETag", """ + selected.sha1Hex() + """);
-    exchange.sendResponseHeaders(200, exchange.getRequestMethod().equalsIgnoreCase("HEAD") ? -1 : selected.size());
+    exchange.getResponseHeaders().set("ETag", "\"" + selected.sha1Hex() + "\"");
+    exchange.sendResponseHeaders(
+        200,
+        exchange.getRequestMethod().equalsIgnoreCase("HEAD") ? -1 : selected.size()
+    );
 
     if (exchange.getRequestMethod().equalsIgnoreCase("GET")) {
       try (InputStream in = Files.newInputStream(selected.file());
@@ -99,14 +102,20 @@ public final class ResourcePackHost implements AutoCloseable {
       exchange.sendResponseHeaders(405, -1);
       return;
     }
+
     ActivePack p = manager.active();
-    byte[] body = (p == null
-        ? "{"active":false}"
-        : "{"active":true,"file":"" + escape(p.file().getFileName().toString())
-            + "","sha1":"" + p.sha1Hex() + ""}")
-        .getBytes(StandardCharsets.UTF_8);
+    String json = p == null
+        ? "{\"active\":false}"
+        : "{\"active\":true,\"file\":\"" + escape(p.file().getFileName().toString())
+            + "\",\"sha1\":\"" + p.sha1Hex() + "\"}";
+
+    byte[] body = json.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-    exchange.sendResponseHeaders(200, exchange.getRequestMethod().equalsIgnoreCase("HEAD") ? -1 : body.length);
+    exchange.sendResponseHeaders(
+        200,
+        exchange.getRequestMethod().equalsIgnoreCase("HEAD") ? -1 : body.length
+    );
+
     if (exchange.getRequestMethod().equalsIgnoreCase("GET")) {
       try (OutputStream out = exchange.getResponseBody()) {
         out.write(body);
@@ -117,7 +126,7 @@ public final class ResourcePackHost implements AutoCloseable {
   }
 
   private static String escape(String value) {
-    return value.replace("\\", "\\\\").replace(""", "\\"");
+    return value.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 
   public static String urlForPack(String publicUrl, String filename) {
