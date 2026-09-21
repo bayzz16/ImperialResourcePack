@@ -2,6 +2,7 @@ package id.imperial.resourcepack.paper;
 
 import id.imperial.resourcepack.common.*;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -107,7 +108,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
         selected.id(),
         url,
         selected.sha1(),
-        MiniMessageCompat.parse(c.prompt()),
+        MiniMessage.miniMessage().deserialize(c.prompt()),
         c.required()
     );
     if (c.statsEnabled()) stats.sent();
