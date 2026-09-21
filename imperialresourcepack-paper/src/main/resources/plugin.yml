@@ -1,0 +1,13 @@
+name: ImperialResourcePack
+version: 1.1.0
+main: id.imperial.resourcepack.paper.ImperialResourcePackPaper
+api-version: '1.21'
+author: bayzz16
+commands:
+  irp:
+    description: "ImperialResourcePack Java resource-pack manager"
+    usage: "/irp <use|list|info|reload|validate|status|diagnose|stats|profile>"
+    permission: "imperialresourcepack.admin"
+permissions:
+  imperialresourcepack.admin:
+    default: op
