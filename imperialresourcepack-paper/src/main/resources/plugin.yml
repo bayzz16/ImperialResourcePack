@@ -10,4 +10,35 @@ commands:
     permission: "imperialresourcepack.admin"
 permissions:
   imperialresourcepack.admin:
+    description: Full ImperialResourcePack administration access.
+    default: op
+  imperialresourcepack.help:
+    description: View ImperialResourcePack help.
+    default: op
+  imperialresourcepack.list:
+    description: List available resource packs.
+    default: op
+  imperialresourcepack.use:
+    description: Select and activate a resource pack.
+    default: op
+  imperialresourcepack.info:
+    description: View active resource pack information.
+    default: op
+  imperialresourcepack.reload:
+    description: Reload ImperialResourcePack configuration and packs.
+    default: op
+  imperialresourcepack.validate:
+    description: Validate the active resource pack.
+    default: op
+  imperialresourcepack.status:
+    description: View resource pack system status.
+    default: op
+  imperialresourcepack.diagnose:
+    description: Diagnose resource pack delivery and hosting.
+    default: op
+  imperialresourcepack.stats:
+    description: View resource pack delivery statistics.
+    default: op
+  imperialresourcepack.profile:
+    description: Manage resource pack profiles.
     default: op
