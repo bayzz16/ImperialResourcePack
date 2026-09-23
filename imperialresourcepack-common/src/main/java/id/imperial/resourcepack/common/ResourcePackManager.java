@@ -45,10 +45,12 @@ public final class ResourcePackManager {
             "[ImperialResourcePack] No resource pack ZIP found. Resource-pack delivery is idle until a pack is added.");
         return active;
       }
-      lastScanNotice = "";
+      // Keep activation failures stateful too, so auto-reload cannot spam the console.
       ActivationResult result = activate(selected, directory, config);
       if (!result.success()) {
         notifyScan("activation-failed", "[ImperialResourcePack] ERROR: " + result.message());
+      } else {
+        lastScanNotice = "";
       }
       return active;
     } catch (IOException e) {
