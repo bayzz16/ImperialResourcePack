@@ -20,7 +20,7 @@ validation:
   require-pack-mcmeta: true
   max-size-mb: 256
 
-version-mapping: true
+version-mapping: true\ndebug: false
 version-mapping-fallback-to-active: true
 
 auto-reload:
