@@ -24,5 +24,5 @@ public final class ResourcePackValidator {
       return requireMcmeta && !mcmeta ? ValidationResult.invalid("pack.mcmeta not found.") : ValidationResult.success();
     } catch (IOException e) { return ValidationResult.invalid("Resource pack ZIP is invalid: " + e.getMessage()); }
   }
-  public record ValidationResult(boolean valid, String message) { static ValidationResult success(){return new ValidationResult(true,"Valid resource pack.");} static ValidationResult invalid(String m){return new ValidationResult(false,m);} }
+  public record ValidationResult(boolean valid, String message) { public static ValidationResult success(){return new ValidationResult(true,"Valid resource pack.");} public static ValidationResult invalid(String m){return new ValidationResult(false,m);} }
 }
