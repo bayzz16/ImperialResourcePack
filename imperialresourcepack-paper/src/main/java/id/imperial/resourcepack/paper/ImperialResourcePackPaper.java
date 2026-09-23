@@ -3,7 +3,7 @@ package id.imperial.resourcepack.paper;
 import id.imperial.resourcepack.common.*;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -14,13 +14,18 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
+import java.net.URI;
 import java.nio.file.*;
-import java.util.Locale;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.*;
 
 public final class ImperialResourcePackPaper extends JavaPlugin implements Listener {
-  private final ExecutorService worker = Executors.newFixedThreadPool(2);
+  private final ExecutorService worker = Executors.newFixedThreadPool(3, r -> {
+    Thread t = new Thread(r, "ImperialResourcePack-IO");
+    t.setDaemon(true);
+    return t;
+  });
   private ResourcePackManager manager;
   private ResourcePackHost host;
   private ResourcePackStats stats;
@@ -72,49 +77,37 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   void send(Player player) {
     ResourcePackConfig c = config;
-    if (c == null || c.publicUrl().isBlank() || !host.running()) return;
+    if (c == null || !c.enabled() || !c.deliveryEnabled()) return;
 
-    ActivePack fallback = manager.active();
-    int protocol = player.getProtocolVersion();
-    ActivePack selected = null;
-    String detected = "none";
-    if (c.versionMapping()) {
-      for (String version : MinecraftProtocolVersions.versionsFor(protocol)) {
-        Path file = manager.versionPack(packsDirectory(), version);
-        if (file == null) continue;
-        var prepared = manager.prepare(file, packsDirectory(), c);
-        if (prepared.success()) {
-          selected = prepared.pack();
-          detected = version;
-          break;
-        }
-        getLogger().warning("[ImperialResourcePack] Ignoring invalid version-mapped pack "
-            + file.getFileName() + ": " + prepared.message());
-      }
-    }
-
-    if (selected == null && fallback != null && c.fallbackToActive()) {
-      selected = fallback;
-      detected = "fallback";
-    }
-
-    if (selected == null) {
-      getLogger().warning("[ImperialResourcePack] No resource pack available for protocol " + protocol
-          + ". Add the mapped ZIP or configure a valid active-pack.");
+    if (isBedrockPlayer(player)) {
+      debug("Player " + player.getName() + " is Bedrock/Floodgate; Java resource pack skipped.");
       return;
     }
 
-    if (c.versionMapping() && "none".equals(detected) && !c.fallbackToActive()) {
-      getLogger().warning("[ImperialResourcePack] No mapped pack for protocol " + protocol
-          + " and fallback is disabled.");
+    if (c.publicUrl().isBlank() || !host.running()) {
+      warnOnce("delivery-host", "[ImperialResourcePack] Java delivery skipped: hosting is offline or public-url is empty.");
       return;
     }
 
-    String packPath = packsDirectory().relativize(selected.file().toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/');
+    Selection selection = select(player);
+    if (selection.pack() == null) {
+      warnOnce("no-pack-" + player.getProtocolVersion(),
+          "[ImperialResourcePack] No resource pack available for protocol " + selection.protocol()
+              + " (" + selection.version() + "). " + selection.reason());
+      return;
+    }
+
+    ActivePack selected = selection.pack();
+    String packPath = packsDirectory().relativize(selected.file().toAbsolutePath().normalize())
+        .toString().replace(java.io.File.separatorChar, '/');
     String url = ResourcePackHost.urlForPack(c.publicUrl(), packPath);
-    getLogger().info("[ImperialResourcePack] Client=" + player.getName()
-        + " protocol=" + protocol + ", detected-version=" + detected
-        + ", sending=" + selected.file().getFileName());
+
+    debug("Player " + player.getName() + " connected with protocol " + selection.protocol());
+    debug("Resolved version " + selection.version());
+    debug("Route -> " + (selection.route() == null ? "none" : selection.route().range()));
+    debug("File -> " + selected.file());
+    debug("URL -> " + url);
+    debug("Sending resource pack...");
 
     player.setResourcePack(
         selected.id(),
@@ -124,6 +117,31 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
         c.required()
     );
     if (c.statsEnabled()) stats.sent();
+  }
+
+  private Selection select(Player player) {
+    int protocol = detectClientProtocol(player);
+    List<String> versions = MinecraftProtocolVersions.versionsFor(protocol);
+    if (versions.isEmpty()) {
+      return new Selection(protocol, "unknown", null, null, "no supported Minecraft protocol mapping");
+    }
+
+    for (String version : versions) {
+      Path file = manager.versionPack(packsDirectory(), version);
+      if (file == null) continue;
+      var prepared = manager.prepare(file, packsDirectory(), config);
+      if (prepared.success()) {
+        return new Selection(protocol, version, manager.route(version).orElse(null), prepared.pack(), "mapped");
+      }
+    }
+
+    if (config.fallbackToActive() && manager.active() != null) {
+      return new Selection(protocol, versions.getFirst(), manager.route(versions.getFirst()).orElse(null),
+          manager.active(), "mapped pack missing; using active-pack fallback");
+    }
+
+    return new Selection(protocol, versions.getFirst(), manager.route(versions.getFirst()).orElse(null),
+        null, "mapped pack missing and active-pack fallback is disabled");
   }
 
   void applyToOnlinePlayers() {
@@ -136,15 +154,10 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   synchronized String use(String value) {
     ResourcePackConfig c = config;
-    Path selected = null;
+    ResourcePackManager.ResolutionResult resolution = manager.resolveValidDetailed(packsDirectory(), value, c);
+    if (!resolution.success()) return "No valid pack matched '" + value + "': " + resolution.message();
 
-    if (looksLikeVersion(value)) {
-      selected = manager.versionPack(packsDirectory(), value);
-    }
-    if (selected == null) selected = manager.resolveValid(packsDirectory(), value, c);
-    if (selected == null) return "No valid pack matched '" + value + "'.";
-
-    var result = manager.activate(selected, packsDirectory(), c);
+    var result = manager.activate(resolution.file(), packsDirectory(), c);
     if (!result.success()) return "Pack was NOT changed: " + result.message();
 
     inventoryFingerprint = manager.inventoryFingerprint(packsDirectory());
@@ -153,12 +166,8 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
         + ". Online Java players are being updated automatically.";
   }
 
-  private static boolean looksLikeVersion(String value) {
-    return value != null && value.matches("\\d+\\.\\d+(?:\\.\\d+)?");
-  }
-
   String openUseMenu(org.bukkit.command.CommandSender sender) {
-    if (!(sender instanceof org.bukkit.entity.Player player)) {
+    if (!(sender instanceof Player player)) {
       sender.sendMessage("[IRP] Console: use /irp use <file-or-version>.");
       return "";
     }
@@ -172,24 +181,60 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     return "";
   }
 
-  String statusMessage() {
-    ActivePack active = manager.active();
-    return "enabled=" + config.enabled()
-        + " | HTTP=" + host.running()
-        + " | mapping=" + config.versionMapping()
-        + " | auto-reload=" + config.autoReload()
-        + " | active=" + (active == null ? "none" : active.file().getFileName())
-        + " | packs=" + manager.listAll(packsDirectory()).size();
+  String pathsMessage() {
+    Path dir = packsDirectory().toAbsolutePath().normalize();
+    int total = manager.listAll(dir).size();
+    return "Pack directory: " + dir
+        + "\nZIP detected: " + total
+        + "\nHosting: " + (config.publicUrl().isBlank() ? "MISSING" : config.publicUrl());
   }
 
-  String diagnoseMessage() {
-    int total = manager.listAll(packsDirectory()).size();
-    int valid = manager.listValid(packsDirectory(), config).size();
-    int mapped = manager.versionMappings(packsDirectory()).size();
-    return "packs=" + total + ", valid=" + valid + ", mappings=" + mapped
-        + ", active=" + (manager.active() == null ? "none" : "OK")
-        + ", HTTP=" + (host.running() ? "ONLINE" : "OFFLINE")
-        + ", public-url=" + (config.publicUrl().isBlank() ? "MISSING" : "OK");
+  String diagnoseMessage(String version) {
+    if (version == null || version.isBlank()) return diagnoseSummary();
+    var route = manager.route(version);
+    Path resolved = manager.versionPack(packsDirectory(), version);
+    String expected = manager.expectedRouteFile(version);
+    ResourcePackValidator.ValidationResult validation = resolved == null
+        ? ResourcePackValidator.ValidationResult.invalid("No file resolved.")
+        : manager.validate(resolved, config);
+
+    StringBuilder out = new StringBuilder();
+    out.append("Client version: ").append(version).append('\n');
+    out.append("Route: ").append(route.map(SorterResolver.Route::range).orElse("NONE")).append('\n');
+    out.append("Expected: ").append(expected.isBlank() ? "NONE" : expected).append('\n');
+    out.append("Resolved file: ").append(resolved == null ? "NONE" : resolved.toAbsolutePath().normalize()).append('\n');
+    out.append("Exists: ").append(resolved != null && Files.isRegularFile(resolved)).append('\n');
+    out.append("ZIP valid: ").append(validation.valid()).append(" (" + validation.message() + ")\n");
+    out.append("pack.mcmeta root: ").append(hasRootMcmeta(resolved)).append('\n');
+    if (resolved != null) {
+      var prepared = manager.prepare(resolved, packsDirectory(), config);
+      out.append("SHA-1: ").append(prepared.success() ? prepared.pack().sha1Hex() : "N/A").append('\n');
+      out.append("Size: ").append(prepared.success() ? prepared.pack().size() : Files.size(resolved)).append('\n');
+      out.append("Final URL: ").append(prepared.success() ? ResourcePackHost.urlForPack(config.publicUrl(),
+          packsDirectory().relativize(resolved.toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/')) : "N/A").append('\n');
+      if (!prepared.success()) out.append("Reason: ").append(prepared.message()).append('\n');
+    }
+    return out.toString().trim();
+  }
+
+  String diagnoseHostingMessage() {
+    return host.diagnostic();
+  }
+
+  String diagnoseSummary() {
+    ResourcePackManager.AuditReport report = manager.audit(packsDirectory(), config);
+    StringBuilder out = new StringBuilder();
+    out.append("Pack directory: ").append(packsDirectory().toAbsolutePath().normalize()).append('\n');
+    out.append("ZIP detected: ").append(report.zipDetected()).append('\n');
+    out.append("Version routes: ").append(report.routeCount()).append('\n');
+    out.append("Resolved: ").append(report.resolvedRoutes()).append('/').append(report.routeCount()).append('\n');
+    out.append("Invalid ZIP: ").append(report.invalidZip()).append('\n');
+    out.append("Missing pack.mcmeta: ").append(report.missingMcmeta()).append('\n');
+    out.append("Duplicate basenames: ").append(report.duplicateBasenames()).append('\n');
+    out.append("Missing routes: ").append(report.missingRoutes()).append('\n');
+    if (!report.routeFailures().isEmpty()) out.append("Route failures: ").append(report.routeFailures()).append('\n');
+    if (!report.failures().isEmpty()) out.append("Pack failures: ").append(report.failures()).append('\n');
+    return out.toString().trim();
   }
 
   String statsMessage() {
@@ -199,6 +244,47 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
         + ", declined=" + stats.declinedCount()
         + ", failed=" + stats.failedCount()
         + ", auto-reloads=" + stats.reloadCount();
+  }
+
+  void rescanAsync(org.bukkit.command.CommandSender sender) {
+    sender.sendMessage("[IRP] Rescan started asynchronously; player delivery is not triggered.");
+    Path packs = packsDirectory();
+    ResourcePackConfig c = config;
+    worker.submit(() -> {
+      manager.rebuildRouteCache(packs);
+      manager.prewarm(packs, c);
+      ResourcePackManager.AuditReport report = manager.audit(packs, c);
+      inventoryFingerprint = manager.inventoryFingerprint(packs);
+      getServer().getScheduler().runTask(this, () -> {
+        sender.sendMessage("[IRP] Rescan complete: resolved " + report.resolvedRoutes() + "/" + report.routeCount()
+            + ", invalid=" + report.invalidZip() + ", missingRoutes=" + report.missingRoutes()
+            + ", duplicates=" + report.duplicateBasenames());
+      });
+    });
+  }
+
+  void playerMessage(org.bukkit.command.CommandSender sender, String name) {
+    Player player = Bukkit.getPlayerExact(name);
+    if (player == null) {
+      sender.sendMessage("[IRP] Player not found or offline: " + name);
+      return;
+    }
+    if (isBedrockPlayer(player)) {
+      sender.sendMessage("[IRP] Player=" + player.getName() + " | Floodgate=true | Java pack=SKIPPED");
+      return;
+    }
+    Selection selection = select(player);
+    String url = selection.pack() == null ? "N/A" : ResourcePackHost.urlForPack(config.publicUrl(),
+        packsDirectory().relativize(selection.pack().file().toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/'));
+    sender.sendMessage("[IRP] Player=" + player.getName()
+        + " | protocol=" + selection.protocol()
+        + " | version=" + selection.version()
+        + " | Floodgate=false"
+        + " | route=" + (selection.route() == null ? "NONE" : selection.route().range())
+        + " | pack=" + (selection.pack() == null ? "NONE" : selection.pack().file().getFileName())
+        + " | URL=" + url
+        + " | SHA-1=" + (selection.pack() == null ? "N/A" : selection.pack().sha1Hex())
+        + " | status=" + (selection.pack() == null ? selection.reason() : "READY"));
   }
 
   String reload() {
@@ -214,61 +300,124 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       }
 
       ResourcePackConfig loaded = ResourcePackConfig.load(file);
-      Path packs = data.resolve(loaded.packsDirectory()).normalize();
-      if (!packs.startsWith(data)) return "Invalid packs-directory.";
+      Path packs = resolvePacksDirectory(data, loaded.packsDirectory());
+      Files.createDirectories(packs);
 
       config = loaded;
       manager.scan(packs, loaded);
+      manager.rebuildRouteCache(packs);
       inventoryFingerprint = manager.inventoryFingerprint(packs);
       host.start(loaded, worker, packs);
+      warnPublicUrl(loaded, packs);
       configureAutoReload();
 
-      if (loaded.publicUrl().isBlank()) {
-        getLogger().warning("[ImperialResourcePack] WARNING: hosting.public-url is empty.");
-      }
+      worker.submit(() -> {
+        manager.rebuildRouteCache(packs);
+        manager.prewarm(packs, loaded);
+        ResourcePackManager.AuditReport report = manager.audit(packs, loaded);
+        getServer().getScheduler().runTask(this, () -> logAudit(report, packs));
+      });
+
       return "Reload complete. Active=" +
-          (manager.active() == null ? "none" : manager.active().file().getFileName());
+          (manager.active() == null ? "none" : manager.active().file().getFileName())
+          + ". No players were resent.";
     } catch (Exception e) {
       getLogger().severe("[ImperialResourcePack] ERROR: " + e.getMessage());
       return "Reload failed: " + e.getMessage();
     }
   }
 
-  private void configureAutoReload() {
-    if (autoReloadTask != null) autoReloadTask.cancel();
-    if (!config.autoReload()) return;
+  private void logAudit(ResourcePackManager.AuditReport report, Path packs) {
+    getLogger().info("[ImperialResourcePack] Pack directory: " + packs.toAbsolutePath().normalize());
+    getLogger().info("[ImperialResourcePack] ZIP detected: " + report.zipDetected());
+    getLogger().info("[ImperialResourcePack] Version routes: " + report.routeCount());
+    getLogger().info("[ImperialResourcePack] Resolved: " + report.resolvedRoutes() + "/" + report.routeCount());
+    getLogger().info("[ImperialResourcePack] Invalid ZIP: " + report.invalidZip());
+    getLogger().info("[ImperialResourcePack] Missing pack.mcmeta: " + report.missingMcmeta());
+    getLogger().info("[ImperialResourcePack] Duplicate basenames: " + report.duplicateBasenames());
+    getLogger().info("[ImperialResourcePack] Missing routes: " + report.missingRoutes());
+    report.routeFailures().forEach(x -> getLogger().warning("[ImperialResourcePack] Route failure: " + x));
+    report.failures().forEach(x -> getLogger().warning("[ImperialResourcePack] Pack failure: " + x));
+    report.duplicates().forEach(x -> getLogger().warning("[ImperialResourcePack] Duplicate basename: " + x));
+  }
 
-    long periodTicks = Math.max(20, config.autoReloadIntervalMs() / 50);
-    autoReloadTask = getServer().getScheduler().runTaskTimer(this, () -> {
-      try {
-        String before = inventoryFingerprint;
-        ActivePack previous = manager.active();
-        manager.scan(packsDirectory(), config);
-        String after = manager.inventoryFingerprint(packsDirectory());
-
-        if (!Objects.equals(before, after)) {
-          inventoryFingerprint = after;
-          if (config.statsEnabled()) stats.reload();
-          boolean activeChanged = previous == null
-              ? manager.active() != null
-              : manager.active() != null
-                  && (!previous.sha1Hex().equals(manager.active().sha1Hex())
-                      || previous.modified() != manager.active().modified()
-                      || !previous.file().equals(manager.active().file()));
-
-          getLogger().info("[ImperialResourcePack] Packs folder changed. "
-              + "Discovery/validation refreshed automatically.");
-          if (activeChanged || config.versionMapping()) applyToOnlinePlayers();
-        }
-      } catch (Exception e) {
-        getLogger().warning("[ImperialResourcePack] Auto-reload check failed: " + e.getMessage());
+  private void warnPublicUrl(ResourcePackConfig c, Path packs) {
+    if (c.publicUrl().isBlank()) {
+      getLogger().warning("[ImperialResourcePack] WARNING: hosting.public-url is empty.");
+      return;
+    }
+    try {
+      URI uri = URI.create(c.publicUrl());
+      int port = uri.getPort();
+      if (port != -1 && port != c.port()) {
+        getLogger().warning("[ImperialResourcePack] WARNING: public-url uses port " + port
+            + " while hosting listens on " + c.port() + ". This is valid only when a reverse proxy forwards to the host.");
+      } else if (port == -1) {
+        getLogger().info("[ImperialResourcePack] public-url has no explicit port; assuming reverse proxy/default HTTP(S) forwarding to " + c.port() + ".");
       }
-    }, periodTicks, periodTicks);
+      if (uri.getPath() != null && !uri.getPath().equals(c.hostPath())) {
+        getLogger().warning("[ImperialResourcePack] WARNING: public-url path '" + uri.getPath()
+            + "' differs from hosting.path '" + c.hostPath() + "'.");
+      }
+    } catch (IllegalArgumentException e) {
+      getLogger().warning("[ImperialResourcePack] WARNING: invalid hosting.public-url: " + c.publicUrl());
+    }
+  }
+
+  private static Path resolvePacksDirectory(Path data, String configured) {
+    Path raw = Path.of(configured);
+    return raw.isAbsolute() ? raw.normalize() : data.resolve(raw).normalize();
+  }
+
+  private boolean hasRootMcmeta(Path file) {
+    if (file == null || !Files.isRegularFile(file)) return false;
+    try (var zip = new java.util.zip.ZipFile(file.toFile())) {
+      var entry = zip.getEntry("pack.mcmeta");
+      return entry != null && !entry.isDirectory();
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private boolean isBedrockPlayer(Player player) {
+    try {
+      Class<?> apiClass = Class.forName("org.geysermc.floodgate.api.FloodgateApi");
+      Object api = apiClass.getMethod("getInstance").invoke(null);
+      Object result = apiClass.getMethod("isFloodgatePlayer", UUID.class).invoke(api, player.getUniqueId());
+      return Boolean.TRUE.equals(result);
+    } catch (Throwable ignored) {
+      return false;
+    }
+  }
+
+  private int detectClientProtocol(Player player) {
+    try {
+      Class<?> viaClass = Class.forName("com.viaversion.viaversion.api.Via");
+      Object api = viaClass.getMethod("getAPI").invoke(null);
+      Object result = api.getClass().getMethod("getPlayerVersion", UUID.class).invoke(api, player.getUniqueId());
+      if (result instanceof Number number && number.intValue() > 0) return number.intValue();
+    } catch (Throwable ignored) { }
+    return player.getProtocolVersion();
+  }
+
+  private void debug(String message) {
+    if (config != null && config.debug()) getLogger().info("[IRP DEBUG] " + message);
+  }
+
+  private void warnOnce(String key, String message) {
+    getLogger().warning(message);
+  }
+
+  Path packsDirectory() {
+    ResourcePackConfig c = config;
+    if (c == null) return getDataFolder().toPath().resolve("packs").normalize();
+    return resolvePacksDirectory(getDataFolder().toPath(), c.packsDirectory());
   }
 
   ResourcePackManager manager() { return manager; }
   ResourcePackHost host() { return host; }
   ResourcePackConfig config() { return config; }
-  Path packsDirectory() { return getDataFolder().toPath().resolve(config.packsDirectory()).normalize(); }
   ResourcePackStats stats() { return stats; }
+
+  private record Selection(int protocol, String version, SorterResolver.Route route, ActivePack pack, String reason) {}
 }
