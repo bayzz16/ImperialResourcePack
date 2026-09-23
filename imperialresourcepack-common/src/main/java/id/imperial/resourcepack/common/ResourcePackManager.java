@@ -156,6 +156,11 @@ public final class ResourcePackManager {
   public Path versionPack(Path directory, String version) {
     if (version == null || version.isBlank()) return null;
 
+    // Prefer metadata inside the ZIP. This keeps routing independent from
+    // filenames and allows future packs to use any filename.
+    Path metadata = PackMetadataResolver.find(directory, version);
+    if (metadata != null && Files.isRegularFile(metadata)) return metadata;
+
     Optional<SorterResolver.Route> routed = SorterResolver.resolve(version);
     if (routed.isPresent()) {
       String routedFile = routed.get().file();
