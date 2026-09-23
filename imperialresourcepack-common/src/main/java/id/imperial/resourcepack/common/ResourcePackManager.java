@@ -6,13 +6,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 public final class ResourcePackManager {
   private final Logger logger;
   private final ResourcePackValidator validator = new ResourcePackValidator();
+  private final Map<Path, CacheEntry> cache = new ConcurrentHashMap<>();
   private volatile ActivePack active;
-  private String lastScanNotice = "";
+  private volatile String lastScanNotice = "";
 
   public ResourcePackManager(Logger logger) { this.logger = logger; }
   public ActivePack active() { return active; }
@@ -23,16 +25,13 @@ public final class ResourcePackManager {
       List<Path> zips = listZipFiles(directory);
       Path selected = null;
       if (!config.activePack().isBlank()) {
-        selected = safeChild(directory, config.activePack());
-        if (selected == null || !Files.isRegularFile(selected)) {
-          selected = findUniquePack(directory, config.activePack());
-        }
-        if (selected == null || !Files.isRegularFile(selected)) {
-          notifyScan("configured-missing",
-              "[ImperialResourcePack] active-pack points to a missing file: " + config.activePack()
-                  + ". Use the relative path from packs/ if the ZIP is inside a subfolder.");
+        ResolutionResult resolution = resolvePath(directory, config.activePack(), config);
+        if (!resolution.success()) {
+          notifyScan("configured-missing:" + resolution.message(),
+              "[ImperialResourcePack] active-pack could not be resolved: " + resolution.message());
           return active;
         }
+        selected = resolution.file();
       } else if (zips.size() == 1) {
         selected = zips.getFirst();
       } else if (zips.size() > 1) {
@@ -45,16 +44,16 @@ public final class ResourcePackManager {
             "[ImperialResourcePack] No resource pack ZIP found. Resource-pack delivery is idle until a pack is added.");
         return active;
       }
-      // Keep activation failures stateful too, so auto-reload cannot spam the console.
+
       ActivationResult result = activate(selected, directory, config);
       if (!result.success()) {
-        notifyScan("activation-failed", "[ImperialResourcePack] ERROR: " + result.message());
+        notifyScan("activation-failed:" + result.message(), "[ImperialResourcePack] ERROR: " + result.message());
       } else {
         lastScanNotice = "";
       }
       return active;
     } catch (IOException e) {
-      logger.severe("[ImperialResourcePack] Cannot scan packs: " + e.getMessage());
+      notifyScan("scan-io:" + e.getMessage(), "[ImperialResourcePack] Cannot scan packs: " + e.getMessage());
       return active;
     }
   }
@@ -76,21 +75,24 @@ public final class ResourcePackManager {
 
   public ActivationResult prepare(Path selected, Path directory, ResourcePackConfig config) {
     try {
-      if (selected == null) return ActivationResult.failure("Resource pack file was not found in packs-directory.");
-      // The resolver may return a real file discovered recursively inside packs/.
-      // Re-resolving that absolute path through safeChild() can incorrectly reject
-      // valid nested/normalized paths on some filesystems. Validate the canonical
-      // normalized path directly instead.
-      Path root = directory.toAbsolutePath().normalize();
-      Path file = selected.toAbsolutePath().normalize();
-      if (!file.startsWith(root) || !Files.isRegularFile(file)) {
-        return ActivationResult.failure("Resource pack file was not found in packs-directory.");
-      }
-      ResourcePackValidator.ValidationResult validation =
-          validator.validate(file, config.requireMcmeta(), config.maxSizeBytes());
-      if (!validation.valid()) return ActivationResult.failure(validation.message());
+      Path file = secureFile(directory, selected);
+      if (file == null) return ActivationResult.failure("Resource pack file was not found in packs-directory.");
       long size = Files.size(file);
       long modified = Files.getLastModifiedTime(file).toMillis();
+
+      CacheEntry cached = cache.get(file);
+      if (cached != null && cached.size == size && cached.modified == modified) {
+        return cached.toResult();
+      }
+
+      ResourcePackValidator.ValidationResult validation =
+          validator.validate(file, config.requireMcmeta(), config.maxSizeBytes());
+      if (!validation.valid()) {
+        CacheEntry entry = CacheEntry.invalid(size, modified, validation.message());
+        cache.put(file, entry);
+        return entry.toResult();
+      }
+
       byte[] hash = sha1(file);
       String hex = HexFormat.of().formatHex(hash);
       ActivePack next = new ActivePack(
@@ -98,22 +100,26 @@ public final class ResourcePackManager {
           UUID.nameUUIDFromBytes(("ImperialResourcePack:" + hex).getBytes(StandardCharsets.UTF_8)),
           validation
       );
-      return ActivationResult.success(next);
+      CacheEntry entry = CacheEntry.valid(size, modified, next);
+      cache.put(file, entry);
+      return entry.toResult();
     } catch (IOException e) {
       return ActivationResult.failure("Unable to prepare resource pack: " + e.getMessage());
     }
   }
 
-  public List<Path> listValid(Path directory, ResourcePackConfig config) {
-    try {
-      List<Path> result = new ArrayList<>();
-      for (Path file : listZipFiles(directory)) {
-        if (validator.validate(file, config.requireMcmeta(), config.maxSizeBytes()).valid()) result.add(file);
-      }
-      return result;
-    } catch (IOException e) {
-      return List.of();
+  public void prewarm(Path directory, ResourcePackConfig config) {
+    for (Path file : listAll(directory)) {
+      prepare(file, directory, config);
     }
+  }
+
+  public List<Path> listValid(Path directory, ResourcePackConfig config) {
+    List<Path> result = new ArrayList<>();
+    for (Path file : listAll(directory)) {
+      if (prepare(file, directory, config).success()) result.add(file);
+    }
+    return result;
   }
 
   public List<Path> listAll(Path directory) {
@@ -124,83 +130,147 @@ public final class ResourcePackManager {
     }
   }
 
-  private void notifyScan(String state, String message) {
-    if (!state.equals(lastScanNotice)) {
-      logger.warning(message);
-      lastScanNotice = state;
+  public ResolutionResult resolveValidDetailed(Path directory, String requested, ResourcePackConfig config) {
+    if (requested == null || requested.isBlank()) return ResolutionResult.failure("requested filename is empty.");
+    if (hasTraversal(requested)) return ResolutionResult.failure("path traversal is not allowed: " + requested);
+
+    // 1. Exact relative path.
+    Path exactRelative = safeChild(directory, requested);
+    if (exactRelative != null && isZipFile(exactRelative)) {
+      return validated(exactRelative, directory, config);
     }
+
+    // 2. Exact filename in the root.
+    String basename = basename(requested);
+    Path rootFile = safeChild(directory, basename);
+    if (rootFile != null && isZipFile(rootFile)) {
+      return validated(rootFile, directory, config);
+    }
+
+    // 3. Recursive exact basename search.
+    List<Path> matches = findPacksByBasename(directory, basename);
+    if (matches.size() > 1) {
+      return ResolutionResult.failure("duplicate basename '" + basename + "' found in "
+          + matches.stream().map(Path::toString).sorted().toList());
+    }
+    if (matches.size() == 1) {
+      return validated(matches.getFirst(), directory, config);
+    }
+
+    // 4. Version route lookup, if the input itself is a Minecraft version.
+    if (looksLikeVersion(requested)) {
+      Path routed = versionPack(directory, requested);
+      if (routed != null) return validated(routed, directory, config);
+    }
+
+    return ResolutionResult.failure("no ZIP matched '" + requested + "'.");
   }
 
   public Path resolveValid(Path directory, String filename, ResourcePackConfig config) {
-    Path file = safeChild(directory, filename);
-    if (file == null || !Files.isRegularFile(file)) return null;
-    return validator.validate(file, config.requireMcmeta(), config.maxSizeBytes()).valid() ? file : null;
+    ResolutionResult result = resolveValidDetailed(directory, filename, config);
+    return result.success() ? result.file() : null;
   }
 
-  public String inventoryFingerprint(Path directory) {
-    try {
-      StringBuilder out = new StringBuilder();
-      for (Path file : listZipFiles(directory)) {
-        out.append(file.getFileName()).append('|')
-            .append(Files.size(file)).append('|')
-            .append(Files.getLastModifiedTime(file).toMillis()).append('\n');
-      }
-      return out.toString();
-    } catch (IOException e) {
-      return "ERROR:" + e.getClass().getName();
-    }
-  }
-
-  /**
-   * Finds a pack for a client version.
-   * Exact names use ResourcePack-<version>.zip.
-   * Range names use ResourcePack-Java_<start>-<end>.zip and are inclusive.
-   */
   public Path versionPack(Path directory, String version) {
     if (version == null || version.isBlank()) return null;
 
-    // Prefer metadata inside the ZIP. This keeps routing independent from
-    // filenames and allows future packs to use any filename.
-    Path metadata = PackMetadataResolver.find(directory, version);
-    if (metadata != null && Files.isRegularFile(metadata)) return metadata;
-
+    // Route manifest is authoritative for the requested version.
     Optional<SorterResolver.Route> routed = SorterResolver.resolve(version);
     if (routed.isPresent()) {
       String routedFile = routed.get().file();
-      Path mapped = safeChild(directory, routedFile);
-      if (mapped != null && Files.isRegularFile(mapped)) return mapped;
 
-      // The sorter manifest may contain its original subfolder layout while
-      // server owners commonly keep all ZIPs directly under packs/. If the
-      // exact routed path is absent, safely resolve the unique matching ZIP
-      // by basename. This keeps per-player routing automatic without forcing
-      // a specific folder structure.
-      Path flattened = findUniquePack(directory, routedFile);
-      if (flattened != null && Files.isRegularFile(flattened)) return flattened;
+      Path exact = safeChild(directory, routedFile);
+      if (isZipFile(exact)) return exact;
+
+      String basename = basename(routedFile);
+      List<Path> byName = findPacksByBasename(directory, basename);
+      if (byName.size() == 1) return byName.getFirst();
+      if (byName.size() > 1) return null;
     }
 
+    // Metadata is a fallback for renamed packs and future pack layouts.
+    Path metadata = PackMetadataResolver.find(directory, version);
+    if (metadata != null && isZipFile(metadata)) return metadata;
+
+    // Legacy filename/range fallback.
     Path exact = safeChild(directory, "ResourcePack-" + version + ".zip");
-    if (exact != null && Files.isRegularFile(exact)) return exact;
+    if (isZipFile(exact)) return exact;
 
     MinecraftVersion requested = MinecraftVersion.parse(version);
     if (requested == null) return null;
 
-    try {
-      List<VersionRangePack> matches = new ArrayList<>();
-      for (Path file : listZipFiles(directory)) {
-        VersionRangePack range = VersionRangePack.parse(file);
-        if (range != null && range.contains(requested)) matches.add(range);
-      }
-      return matches.stream()
-          .sorted(Comparator.comparingLong(VersionRangePack::span)
-              .thenComparing(r -> r.file().getFileName().toString()))
-          .map(VersionRangePack::file)
-          .findFirst()
-          .orElse(null);
-    } catch (IOException e) {
-      logger.warning("[ImperialResourcePack] Cannot scan version-mapped packs: " + e.getMessage());
-      return null;
+    List<VersionRangePack> matches = new ArrayList<>();
+    for (Path file : listAll(directory)) {
+      VersionRangePack range = VersionRangePack.parse(file);
+      if (range != null && range.contains(requested)) matches.add(range);
     }
+    if (matches.size() > 1) {
+      matches.sort(Comparator.comparingLong(VersionRangePack::span)
+          .thenComparing(r -> r.file().toString()));
+      if (matches.getFirst().span() == matches.get(1).span()) return null;
+    }
+    return matches.stream()
+        .sorted(Comparator.comparingLong(VersionRangePack::span)
+            .thenComparing(r -> r.file().toString()))
+        .map(VersionRangePack::file)
+        .findFirst()
+        .orElse(null);
+  }
+
+  public Optional<SorterResolver.Route> route(String version) {
+    return SorterResolver.resolve(version);
+  }
+
+  public AuditReport audit(Path directory, ResourcePackConfig config) {
+    List<Path> zips = listAll(directory);
+    int invalid = 0, missingMcmeta = 0;
+    List<String> failures = new ArrayList<>();
+    for (Path file : zips) {
+      ActivationResult prepared = prepare(file, directory, config);
+      if (!prepared.success()) {
+        invalid++;
+        failures.add(file.getFileName() + ": " + prepared.message());
+        if (prepared.message().toLowerCase(Locale.ROOT).contains("pack.mcmeta")) missingMcmeta++;
+      }
+    }
+
+    int resolved = 0, missingRoutes = 0;
+    List<String> routeFailures = new ArrayList<>();
+    for (SorterResolver.Route route : SorterResolver.routes()) {
+      Path file = versionPack(directory, route.range());
+      if (file != null && prepare(file, directory, config).success()) {
+        resolved++;
+      } else {
+        missingRoutes++;
+        routeFailures.add(route.range() + " -> " + basename(route.file()));
+      }
+    }
+
+    Map<String, List<Path>> byBasename = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    for (Path file : zips) byBasename.computeIfAbsent(basename(file.toString()), k -> new ArrayList<>()).add(file);
+    int duplicates = 0;
+    List<String> duplicateNames = new ArrayList<>();
+    for (var e : byBasename.entrySet()) {
+      if (e.getValue().size() > 1) {
+        duplicates++;
+        duplicateNames.add(e.getKey() + " -> " + e.getValue().stream().map(Path::toString).sorted().toList());
+      }
+    }
+
+    return new AuditReport(zips.size(), SorterResolver.routes().size(), resolved, invalid,
+        missingMcmeta, duplicates, missingRoutes, failures, routeFailures, duplicateNames);
+  }
+
+  public String inventoryFingerprint(Path directory) {
+    StringBuilder out = new StringBuilder();
+    for (Path file : listAll(directory)) {
+      try {
+        out.append(file.toAbsolutePath().normalize()).append('|')
+            .append(Files.size(file)).append('|')
+            .append(Files.getLastModifiedTime(file).toMillis()).append('\n');
+      } catch (IOException ignored) { }
+    }
+    return out.toString();
   }
 
   public List<VersionMapping> versionMappings(Path directory) {
@@ -214,8 +284,96 @@ public final class ResourcePackManager {
       }
     }
     return result.stream()
-        .sorted(Comparator.comparing(VersionMapping::label).thenComparing(v -> v.file().getFileName().toString()))
+        .sorted(Comparator.comparing(VersionMapping::label).thenComparing(v -> v.file().toString()))
         .toList();
+  }
+
+  public ResourcePackValidator.ValidationResult validate(Path file, ResourcePackConfig config) {
+    return prepare(file, file.getParent(), config).success()
+        ? ResourcePackValidator.ValidationResult.success()
+        : prepare(file, file.getParent(), config).validation();
+  }
+
+  public ResourcePackValidator.ValidationResult validateActive(ResourcePackConfig config) {
+    ActivePack p = active;
+    return p == null
+        ? ResourcePackValidator.ValidationResult.invalid("No active resource pack.")
+        : validate(p.file(), config);
+  }
+
+  public int cacheSize() { return cache.size(); }
+
+  private ResolutionResult validated(Path file, Path directory, ResourcePackConfig config) {
+    ActivationResult result = prepare(file, directory, config);
+    return result.success()
+        ? ResolutionResult.success(result.pack())
+        : ResolutionResult.failure(result.message());
+  }
+
+  private static boolean looksLikeVersion(String value) {
+    return value.matches("\\d+\\.\\d+(?:\\.\\d+)?");
+  }
+
+  private static boolean hasTraversal(String value) {
+    String normalized = value.replace('\\', '/');
+    return normalized.startsWith("/") || normalized.matches("^[A-Za-z]:.*")
+        || Arrays.asList(normalized.split("/")).contains("..");
+  }
+
+  private static String basename(String value) {
+    String normalized = value.replace('\\', '/');
+    int slash = normalized.lastIndexOf('/');
+    return slash >= 0 ? normalized.substring(slash + 1) : normalized;
+  }
+
+  private static boolean isZipFile(Path file) {
+    return file != null && Files.isRegularFile(file) && !Files.isSymbolicLink(file)
+        && file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip");
+  }
+
+  private static Path secureFile(Path directory, Path selected) {
+    if (directory == null || selected == null) return null;
+    try {
+      Path root = directory.toAbsolutePath().normalize();
+      if (Files.notExists(root)) Files.createDirectories(root);
+      Path rootReal = root.toRealPath();
+      Path file = selected.toAbsolutePath().normalize();
+      if (!file.startsWith(root) || !isZipFile(file)) return null;
+      Path real = file.toRealPath();
+      if (!real.startsWith(rootReal) || !Files.isRegularFile(real)) return null;
+      return real;
+    } catch (IOException e) {
+      return null;
+    }
+  }
+
+  private static Path safeChild(Path directory, String name) {
+    if (directory == null || name == null || name.isBlank() || hasTraversal(name)) return null;
+    Path root = directory.toAbsolutePath().normalize();
+    Path file = root.resolve(name.replace('\\', '/')).normalize();
+    return file.startsWith(root) ? file : null;
+  }
+
+  private static List<Path> findPacksByBasename(Path directory, String wanted) {
+    try (var stream = Files.walk(directory)) {
+      return stream.filter(ResourcePackManager::isZipFile)
+          .filter(p -> p.getFileName().toString().equals(wanted))
+          .sorted(Comparator.comparing(Path::toString))
+          .toList();
+    } catch (IOException e) {
+      return List.of();
+    }
+  }
+
+  private static List<Path> listZipFiles(Path directory) throws IOException {
+    if (directory == null) return List.of();
+    Files.createDirectories(directory);
+    try (var stream = Files.walk(directory)) {
+      return stream
+          .filter(ResourcePackManager::isZipFile)
+          .sorted(Comparator.comparing(Path::toString))
+          .toList();
+    }
   }
 
   private static String exactVersion(Path file) {
@@ -224,6 +382,50 @@ public final class ResourcePackManager {
     String version = name.substring("ResourcePack-".length(), name.length() - ".zip".length());
     return MinecraftVersion.parse(version) != null ? version : null;
   }
+
+  private static byte[] sha1(Path file) throws IOException {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-1");
+      byte[] buffer = new byte[64 * 1024];
+      try (InputStream in = Files.newInputStream(file)) {
+        for (int n; (n = in.read(buffer)) >= 0;) if (n > 0) digest.update(buffer, 0, n);
+      }
+      return digest.digest();
+    } catch (Exception e) {
+      throw new IOException("Unable to calculate SHA-1", e);
+    }
+  }
+
+  private void notifyScan(String state, String message) {
+    if (!state.equals(lastScanNotice)) {
+      logger.warning(message);
+      lastScanNotice = state;
+    }
+  }
+
+  private record CacheEntry(long size, long modified, boolean valid, String message, ActivePack pack) {
+    static CacheEntry valid(long size, long modified, ActivePack pack) {
+      return new CacheEntry(size, modified, true, "Valid resource pack.", pack);
+    }
+    static CacheEntry invalid(long size, long modified, String message) {
+      return new CacheEntry(size, modified, false, message, null);
+    }
+    ActivationResult toResult() {
+      return valid ? ActivationResult.success(pack) : ActivationResult.failure(message);
+    }
+  }
+
+  public record ResolutionResult(boolean success, String message, Path file) {
+    static ResolutionResult success(ActivePack pack) { return new ResolutionResult(true, "Resolved.", pack.file()); }
+    static ResolutionResult failure(String message) { return new ResolutionResult(false, message, null); }
+  }
+
+  public record AuditReport(int zipDetected, int routeCount, int resolvedRoutes, int invalidZip,
+                            int missingMcmeta, int duplicateBasenames, int missingRoutes,
+                            List<String> failures, List<String> routeFailures,
+                            List<String> duplicates) {}
+
+  public record VersionMapping(String label, Path file) {}
 
   private record MinecraftVersion(int major, int minor, int patch) implements Comparable<MinecraftVersion> {
     static MinecraftVersion parse(String value) {
@@ -257,7 +459,6 @@ public final class ResourcePackManager {
         "^ResourcePack(?:-[^_]+)?_(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?)\\.zip$",
         java.util.regex.Pattern.CASE_INSENSITIVE
     );
-
     static VersionRangePack parse(Path file) {
       var matcher = RANGE.matcher(file.getFileName().toString());
       if (!matcher.matches()) return null;
@@ -266,81 +467,14 @@ public final class ResourcePackManager {
       if (start == null || end == null || start.compareTo(end) > 0) return null;
       return new VersionRangePack(file, start, end);
     }
-
     boolean contains(MinecraftVersion version) {
       return start.compareTo(version) <= 0 && end.compareTo(version) >= 0;
     }
-
     long span() {
       return ((long) end.major() - start.major()) * 1_000_000L
           + ((long) end.minor() - start.minor()) * 1_000L
           + end.patch() - start.patch();
     }
-
     String label() { return start + "-" + end; }
-  }
-
-  public record VersionMapping(String label, Path file) {}
-
-  public ResourcePackValidator.ValidationResult validate(Path file, ResourcePackConfig config) {
-    return validator.validate(file, config.requireMcmeta(), config.maxSizeBytes());
-  }
-
-  public ResourcePackValidator.ValidationResult validateActive(ResourcePackConfig config) {
-    ActivePack p = active;
-    return p == null
-        ? ResourcePackValidator.ValidationResult.invalid("No active resource pack.")
-        : validate(p.file(), config);
-  }
-
-  private static List<Path> listZipFiles(Path directory) throws IOException {
-    Files.createDirectories(directory);
-    try (var stream = Files.walk(directory)) {
-      return stream
-          .filter(Files::isRegularFile)
-          .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip"))
-          .sorted(Comparator.comparing(p -> directory.toAbsolutePath().normalize()
-              .relativize(p.toAbsolutePath().normalize()).toString()))
-          .toList();
-    }
-  }
-
-  private static Path findUniquePack(Path directory, String configured) {
-    String normalized = configured.replace('\\', '/');
-    String wanted = Path.of(normalized).getFileName().toString();
-    try (var stream = Files.walk(directory)) {
-      List<Path> matches = stream
-          .filter(Files::isRegularFile)
-          .filter(p -> p.getFileName().toString().equals(wanted))
-          .toList();
-      return matches.size() == 1 ? matches.getFirst() : null;
-    } catch (IOException e) {
-      return null;
-    }
-  }
-
-  private static Path safeChild(Path directory, String name) {
-    if (name == null || name.isBlank()) return null;
-    Path root = directory.toAbsolutePath().normalize();
-    Path file = directory.resolve(name.replace('\\', '/')).normalize();
-    return file.startsWith(root) ? file : null;
-  }
-
-  private static byte[] sha1(Path file) throws IOException {
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-1");
-      byte[] buffer = new byte[8192];
-      try (InputStream in = Files.newInputStream(file)) {
-        for (int n; (n = in.read(buffer)) >= 0;) if (n > 0) digest.update(buffer, 0, n);
-      }
-      return digest.digest();
-    } catch (Exception e) {
-      throw new IOException("Unable to calculate SHA-1", e);
-    }
-  }
-
-  public record ActivationResult(boolean success, String message, ActivePack pack) {
-    static ActivationResult success(ActivePack p) { return new ActivationResult(true, "Activated.", p); }
-    static ActivationResult failure(String m) { return new ActivationResult(false, m, null); }
   }
 }
