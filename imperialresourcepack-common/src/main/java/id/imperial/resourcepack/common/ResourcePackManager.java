@@ -20,6 +20,11 @@ public final class ResourcePackManager {
   public ResourcePackManager(Logger logger) { this.logger = logger; }
   public ActivePack active() { return active; }
 
+  private ResolutionResult resolvePath(Path directory, String requested, ResourcePackConfig config) {
+    return resolveValidDetailed(directory, requested, config);
+  }
+
+
   public synchronized ActivePack scan(Path directory, ResourcePackConfig config) {
     try {
       Files.createDirectories(directory);
@@ -429,6 +434,16 @@ public final class ResourcePackManager {
     }
     ActivationResult toResult() {
       return valid ? ActivationResult.success(pack) : ActivationResult.failure(message);
+    }
+  }
+
+  public record ActivationResult(boolean success, String message, ActivePack pack) {
+    static ActivationResult success(ActivePack pack) { return new ActivationResult(true, "Valid resource pack.", pack); }
+    static ActivationResult failure(String message) { return new ActivationResult(false, message, null); }
+    public ResourcePackValidator.ValidationResult validation() {
+      return success
+          ? ResourcePackValidator.ValidationResult.success()
+          : ResourcePackValidator.ValidationResult.invalid(message);
     }
   }
 
