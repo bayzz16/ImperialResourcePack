@@ -31,6 +31,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
   private ResourcePackStats stats;
   private volatile ResourcePackConfig config;
   private volatile String inventoryFingerprint = "";
+  private final ConcurrentMap<UUID, ActivePack> playerPacks = new ConcurrentHashMap<>();
   private BukkitTask autoReloadTask;
 
   @Override
@@ -108,18 +109,29 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     for (Player player : getServer().getOnlinePlayers()) send(player);
   }
 
-  synchronized String use(String value) {
+  synchronized String use(org.bukkit.command.CommandSender sender, String value) {
     ResourcePackConfig c = config;
-    ResourcePackManager.ResolutionResult resolution = manager.resolveValidDetailed(packsDirectory(), value, c);
+    ResourcePackManager.ResolutionResult resolution =
+        manager.resolveValidDetailed(packsDirectory(), value, c);
     if (!resolution.success()) return "No valid pack matched '" + value + "': " + resolution.message();
 
-    var result = manager.activate(resolution.file(), packsDirectory(), c);
+    var result = manager.prepare(resolution.file(), packsDirectory(), c);
     if (!result.success()) return "Pack was NOT changed: " + result.message();
+
+    if (sender instanceof Player player) {
+      playerPacks.put(player.getUniqueId(), result.pack());
+      getServer().getScheduler().runTask(this, () -> send(player));
+      return "Your private Active Pack is now " + result.pack().file().getFileName()
+          + ". Other Java players are unchanged.";
+    }
+
+    var global = manager.activate(resolution.file(), packsDirectory(), c);
+    if (!global.success()) return "Main Active Pack was NOT changed: " + global.message();
 
     inventoryFingerprint = manager.inventoryFingerprint(packsDirectory());
     applyToOnlinePlayers();
-    return "Active pack changed to " + result.pack().file().getFileName()
-        + ". Online Java players are being updated automatically.";
+    return "Main Active Pack changed to " + global.pack().file().getFileName()
+        + ". Players without a private override will receive it.";
   }
 
   String openUseMenu(org.bukkit.command.CommandSender sender) {
