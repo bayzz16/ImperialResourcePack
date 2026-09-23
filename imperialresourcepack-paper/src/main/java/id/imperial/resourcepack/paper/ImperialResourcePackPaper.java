@@ -329,6 +329,26 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     }
   }
 
+  private void configureAutoReload() {
+    if (autoReloadTask != null) autoReloadTask.cancel();
+    ResourcePackConfig c = config;
+    if (!c.autoReload()) return;
+    long ticks = Math.max(20, c.autoReloadIntervalMs() / 50);
+    autoReloadTask = getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+      Path packs = packsDirectory();
+      String current = manager.inventoryFingerprint(packs);
+      if (current.equals(inventoryFingerprint)) return;
+      inventoryFingerprint = current;
+      worker.submit(() -> {
+        manager.rebuildRouteCache(packs);
+        manager.prewarm(packs, config);
+        ResourcePackManager.AuditReport report = manager.audit(packs, config);
+        getLogger().info("[ImperialResourcePack] Pack inventory changed; cache/routes rebuilt: "
+            + report.resolvedRoutes() + "/" + report.routeCount() + " routes resolved.");
+      });
+    }, ticks, ticks);
+  }
+
   private void logAudit(ResourcePackManager.AuditReport report, Path packs) {
     getLogger().info("[ImperialResourcePack] Pack directory: " + packs.toAbsolutePath().normalize());
     getLogger().info("[ImperialResourcePack] ZIP detected: " + report.zipDetected());
