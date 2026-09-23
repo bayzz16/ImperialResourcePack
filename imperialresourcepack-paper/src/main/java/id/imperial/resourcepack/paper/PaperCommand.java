@@ -63,7 +63,17 @@ final class PaperCommand implements TabExecutor {
       case "reload" -> sender.sendMessage("[IRP] " + plugin.reload());
       case "validate" -> sender.sendMessage("[IRP] " + plugin.manager().validateActive(plugin.config()).message());
       case "status" -> sender.sendMessage("[IRP] " + plugin.statusMessage());
-      case "diagnose" -> sender.sendMessage("[IRP] " + plugin.diagnoseMessage());
+      case "diagnose" -> {
+        if (args.length >= 2 && args[1].equalsIgnoreCase("hosting")) sender.sendMessage("[IRP] " + plugin.diagnoseHostingMessage());
+        else if (args.length >= 2) sender.sendMessage("[IRP] " + plugin.diagnoseMessage(args[1]));
+        else sender.sendMessage("[IRP] " + plugin.diagnoseMessage(null));
+      }
+      case "paths" -> sender.sendMessage("[IRP] " + plugin.pathsMessage());
+      case "rescan" -> plugin.rescanAsync(sender);
+      case "player" -> {
+        if (args.length < 2) sender.sendMessage("[IRP] Format: /irp player <player>");
+        else plugin.playerMessage(sender, args[1]);
+      }
       case "stats" -> sender.sendMessage("[IRP] " + plugin.statsMessage());
       case "profile" -> profile(sender, args);
       default -> sender.sendMessage("§c✦ §fSubcommand tidak dikenal.");
@@ -105,7 +115,7 @@ final class PaperCommand implements TabExecutor {
     if (!sender.hasPermission(P)) return List.of();
 
     if (args.length == 1) {
-      return part(List.of("list", "use", "info", "reload", "validate", "status", "diagnose", "stats", "profile"), args[0]);
+      return part(List.of("list", "use", "info", "reload", "validate", "status", "diagnose", "paths", "rescan", "player", "stats", "profile"), args[0]);
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("use")) {
@@ -116,6 +126,12 @@ final class PaperCommand implements TabExecutor {
           .map(ResourcePackManager.VersionMapping::label).toList());
       return part(result, args[1]);
     }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("diagnose")) {
+      return part(List.of("hosting", "1.7.10", "1.8.9", "1.14.4", "1.20.4", "1.21.1", "1.21.4", "1.21.8", "1.21.9", "1.21.10", "1.21.11", "26.2", "26.3"), args[1]);
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("player")) return List.of();
 
     if (args.length == 2 && args[0].equalsIgnoreCase("profile")) {
       return part(List.of("list", "use"), args[1]);
