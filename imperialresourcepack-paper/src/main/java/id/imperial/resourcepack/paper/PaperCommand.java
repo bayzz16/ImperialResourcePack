@@ -50,7 +50,7 @@ final class PaperCommand implements TabExecutor {
           plugin.openUseMenu(sender);
           return true;
         }
-        sender.sendMessage("[IRP] " + plugin.use(args[1]));
+        sender.sendMessage("[IRP] " + plugin.use(sender, args[1]));
       }
       case "info" -> {
         ActivePack x = plugin.manager().active();
@@ -102,7 +102,7 @@ final class PaperCommand implements TabExecutor {
         sender.sendMessage("§c✦ §fProfile tidak ditemukan: " + args[2]);
         return;
       }
-      sender.sendMessage("[IRP] " + plugin.use(file));
+      sender.sendMessage("[IRP] " + plugin.use(sender, file));
       return;
     }
 
