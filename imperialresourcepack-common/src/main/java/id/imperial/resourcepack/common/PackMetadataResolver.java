@@ -113,9 +113,8 @@ public final class PackMetadataResolver {
   }
 
   private static String unescapeJson(String value) {
-    return value.replace("\\\"", "\"").replace("\\\\\", "\\");
+    return value.replace("\\\"", "\"").replace("\\\\", "\\");
   }
-
   private static List<Path> listZipFiles(Path directory) throws IOException {
     if (Files.notExists(directory)) return List.of();
     try (var stream = Files.walk(directory)) {
