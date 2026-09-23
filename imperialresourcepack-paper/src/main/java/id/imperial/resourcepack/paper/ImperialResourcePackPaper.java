@@ -77,33 +77,18 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   void send(Player player) {
     ResourcePackConfig c = config;
-    if (c == null || !c.enabled() || !c.deliveryEnabled()) return;
-
-
-    if (c.publicUrl().isBlank() || !host.running()) {
-      warnOnce("delivery-host", "[ImperialResourcePack] Java delivery skipped: hosting is offline or public-url is empty.");
+    ActivePack selected = manager.active();
+    if (c == null || selected == null || !c.enabled() || !c.deliveryEnabled()
+        || c.publicUrl().isBlank() || !host.running()) {
       return;
     }
 
-    Selection selection = select(player);
-    if (selection.pack() == null) {
-      warnOnce("no-pack-" + player.getProtocolVersion(),
-          "[ImperialResourcePack] No resource pack available for protocol " + selection.protocol()
-              + " (" + selection.version() + "). " + selection.reason());
-      return;
-    }
+    // Simple/manual mode: the configured active pack is sent to every Java player.
+    // /irp use <filename> changes the active pack and immediately updates online players.
+    String url = ResourcePackHost.urlForPack(c.publicUrl(), selected.file().getFileName().toString());
 
-    ActivePack selected = selection.pack();
-    String packPath = packsDirectory().relativize(selected.file().toAbsolutePath().normalize())
-        .toString().replace(java.io.File.separatorChar, '/');
-    String url = ResourcePackHost.urlForPack(c.publicUrl(), packPath);
-
-    debug("Player " + player.getName() + " connected with protocol " + selection.protocol());
-    debug("Resolved version " + selection.version());
-    debug("Route -> " + (selection.route() == null ? "none" : selection.route().range()));
-    debug("File -> " + selected.file());
-    debug("URL -> " + url);
-    debug("Sending resource pack...");
+    getLogger().info("[ImperialResourcePack] Client=" + player.getName()
+        + ", sending active pack=" + selected.file().getFileName());
 
     player.setResourcePack(
         selected.id(),
@@ -113,31 +98,6 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
         c.required()
     );
     if (c.statsEnabled()) stats.sent();
-  }
-
-  private Selection select(Player player) {
-    int protocol = detectClientProtocol(player);
-    List<String> versions = MinecraftProtocolVersions.versionsFor(protocol);
-    if (versions.isEmpty()) {
-      return new Selection(protocol, "unknown", null, null, "no supported Minecraft protocol mapping");
-    }
-
-    for (String version : versions) {
-      Path file = manager.versionPack(packsDirectory(), version);
-      if (file == null) continue;
-      var prepared = manager.prepare(file, packsDirectory(), config);
-      if (prepared.success()) {
-        return new Selection(protocol, version, manager.route(version).orElse(null), prepared.pack(), "mapped");
-      }
-    }
-
-    if (config.fallbackToActive() && manager.active() != null) {
-      return new Selection(protocol, versions.getFirst(), manager.route(versions.getFirst()).orElse(null),
-          manager.active(), "mapped pack missing; using active-pack fallback");
-    }
-
-    return new Selection(protocol, versions.getFirst(), manager.route(versions.getFirst()).orElse(null),
-        null, "mapped pack missing and active-pack fallback is disabled");
   }
 
   void applyToOnlinePlayers() {
