@@ -234,11 +234,26 @@ public final class ResourcePackManager {
     return SorterResolver.resolve(version).map(r -> basename(r.file())).orElse("");
   }
 
-  public void rebuildRouteCache(Path directory) {
+  /**
+   * Rebuild the complete route index from one immutable inventory snapshot.
+   * This avoids repeated Files.walk() calls returning different partial views
+   * while ZIPs are being uploaded/extracted into the packs directory.
+   */
+  public synchronized void rebuildRouteCache(Path directory) {
+    List<Path> zips = listAll(directory);
+    Map<String, List<Path>> byBasename = new HashMap<>();
+    for (Path file : zips) {
+      byBasename.computeIfAbsent(normalizeBasename(file.getFileName().toString()),
+          ignored -> new ArrayList<>()).add(file);
+    }
+
     Map<String, Path> next = new HashMap<>();
     for (SorterResolver.Route route : SorterResolver.routes()) {
-      List<Path> matches = findPacksByBasename(directory, basename(route.file()));
-      if (matches.size() == 1) next.put(route.range(), matches.getFirst());
+      String wanted = normalizeBasename(route.file());
+      List<Path> matches = byBasename.getOrDefault(wanted, List.of());
+      if (matches.size() == 1) {
+        next.put(route.range(), matches.getFirst());
+      }
     }
     routeCache = Map.copyOf(next);
   }
@@ -348,6 +363,10 @@ public final class ResourcePackManager {
     return slash >= 0 ? normalized.substring(slash + 1) : normalized;
   }
 
+  private static String normalizeBasename(String value) {
+    return basename(value).trim().toLowerCase(Locale.ROOT);
+  }
+
   private static boolean isZipFile(Path file) {
     return file != null && Files.isRegularFile(file) && !Files.isSymbolicLink(file)
         && file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip");
@@ -379,7 +398,7 @@ public final class ResourcePackManager {
   private static List<Path> findPacksByBasename(Path directory, String wanted) {
     try (var stream = Files.walk(directory)) {
       return stream.filter(ResourcePackManager::isZipFile)
-          .filter(p -> p.getFileName().toString().equals(wanted))
+          .filter(p -> normalizeBasename(p.getFileName().toString()).equals(normalizeBasename(wanted)))
           .sorted(Comparator.comparing(Path::toString))
           .toList();
     } catch (IOException e) {
