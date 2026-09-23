@@ -25,8 +25,12 @@ public final class ResourcePackManager {
       if (!config.activePack().isBlank()) {
         selected = safeChild(directory, config.activePack());
         if (selected == null || !Files.isRegularFile(selected)) {
+          selected = findUniquePack(directory, config.activePack());
+        }
+        if (selected == null || !Files.isRegularFile(selected)) {
           notifyScan("configured-missing",
-              "[ImperialResourcePack] active-pack points to a missing file: " + config.activePack());
+              "[ImperialResourcePack] active-pack points to a missing file: " + config.activePack()
+                  + ". Use the relative path from packs/ if the ZIP is inside a subfolder.");
           return active;
         }
       } else if (zips.size() == 1) {
@@ -279,6 +283,20 @@ public final class ResourcePackManager {
           .sorted(Comparator.comparing(p -> directory.toAbsolutePath().normalize()
               .relativize(p.toAbsolutePath().normalize()).toString()))
           .toList();
+    }
+  }
+
+  private static Path findUniquePack(Path directory, String configured) {
+    String normalized = configured.replace('\\', '/');
+    String wanted = Path.of(normalized).getFileName().toString();
+    try (var stream = Files.walk(directory)) {
+      List<Path> matches = stream
+          .filter(Files::isRegularFile)
+          .filter(p -> p.getFileName().toString().equals(wanted))
+          .toList();
+      return matches.size() == 1 ? matches.getFirst() : null;
+    } catch (IOException e) {
+      return null;
     }
   }
 
