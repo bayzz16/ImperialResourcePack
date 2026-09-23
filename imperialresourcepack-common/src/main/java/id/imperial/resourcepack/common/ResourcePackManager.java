@@ -28,8 +28,6 @@ public final class ResourcePackManager {
   public synchronized ActivePack scan(Path directory, ResourcePackConfig config) {
     try {
       Files.createDirectories(directory);
-      List<Path> zips = listZipFiles(directory);
-      rebuildRouteCache(directory);
       Path selected = null;
       if (!config.activePack().isBlank()) {
         ResolutionResult resolution = resolvePath(directory, config.activePack(), config);
@@ -39,16 +37,9 @@ public final class ResourcePackManager {
           return active;
         }
         selected = resolution.file();
-      } else if (zips.size() == 1) {
-        selected = zips.getFirst();
-      } else if (zips.size() > 1) {
-        notifyScan("multiple",
-            "[ImperialResourcePack] Multiple ZIP files found; set active-pack explicitly. "
-                + "Version routing can still select mapped packs automatically.");
-        return active;
       } else {
         notifyScan("empty",
-            "[ImperialResourcePack] No resource pack ZIP found. Resource-pack delivery is idle until a pack is added.");
+            "[ImperialResourcePack] No active pack configured. Resource-pack delivery is idle.");
         return active;
       }
 
@@ -75,8 +66,7 @@ public final class ResourcePackManager {
       return ActivationResult.success(active);
     }
     active = next;
-    logger.info("[ImperialResourcePack] Active pack: " + next.file().getFileName()
-        + " (SHA-1: " + next.sha1Hex() + ")");
+    logger.info("[ImperialResourcePack] Active pack ready.");
     return ActivationResult.success(next);
   }
 
