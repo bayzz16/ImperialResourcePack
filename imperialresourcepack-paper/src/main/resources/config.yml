@@ -1,6 +1,6 @@
 enabled: true
 packs-directory: "packs"
-active-pack: "ResourcePack-Java_PALING-BARU.zip"
+active-pack: "GUI(1.21.9-1.21.10).zip"
 
 delivery:
   enabled: true
