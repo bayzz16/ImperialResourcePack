@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -62,6 +63,11 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       long ticks = Math.max(1, c.sendDelayMs() / 50);
       getServer().getScheduler().runTaskLater(this, () -> send(event.getPlayer()), ticks);
     }
+  }
+
+  @EventHandler
+  public void quit(PlayerQuitEvent event) {
+    playerPacks.remove(event.getPlayer().getUniqueId());
   }
 
   @EventHandler
