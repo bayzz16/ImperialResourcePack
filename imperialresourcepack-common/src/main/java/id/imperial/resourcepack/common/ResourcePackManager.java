@@ -29,19 +29,14 @@ public final class ResourcePackManager {
     try {
       Files.createDirectories(directory);
       Path selected = null;
-      if (!config.activePack().isBlank()) {
-        ResolutionResult resolution = resolvePath(directory, config.activePack(), config);
-        if (!resolution.success()) {
-          notifyScan("configured-missing:" + resolution.message(),
-              "[ImperialResourcePack] active-pack could not be resolved: " + resolution.message());
-          return active;
-        }
-        selected = resolution.file();
-      } else {
-        notifyScan("empty",
-            "[ImperialResourcePack] No active pack configured. Resource-pack delivery is idle.");
+      String requested = config.activePack().isBlank() ? "1.21.10" : config.activePack();
+      ResolutionResult resolution = resolvePath(directory, requested, config);
+      if (!resolution.success()) {
+        notifyScan("configured-missing:" + resolution.message(),
+            "[ImperialResourcePack] Main Active Pack could not be resolved: " + resolution.message());
         return active;
       }
+      selected = resolution.file();
 
       ActivationResult result = activate(selected, directory, config);
       if (!result.success()) {
