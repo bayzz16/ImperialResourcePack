@@ -205,7 +205,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     if (resolved != null) {
       var prepared = manager.prepare(resolved, packsDirectory(), config);
       out.append("SHA-1: ").append(prepared.success() ? prepared.pack().sha1Hex() : "N/A").append('\n');
-      out.append("Size: ").append(prepared.success() ? prepared.pack().size() : Files.size(resolved)).append('\n');
+      out.append("Size: ").append(prepared.success() ? prepared.pack().size() : "N/A").append('\n');
       out.append("Final URL: ").append(prepared.success() ? ResourcePackHost.urlForPack(config.publicUrl(),
           packsDirectory().relativize(resolved.toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/')) : "N/A").append('\n');
       if (!prepared.success()) out.append("Reason: ").append(prepared.message()).append('\n');
