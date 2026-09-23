@@ -1,6 +1,6 @@
 enabled: true
 packs-directory: "packs"
-active-pack: "GUI(1.21.9-1.21.10).zip"
+active-pack: "1.21.10"
 
 delivery:
   enabled: true
