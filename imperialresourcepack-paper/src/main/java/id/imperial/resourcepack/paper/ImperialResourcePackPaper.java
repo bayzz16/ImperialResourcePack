@@ -79,10 +79,6 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     ResourcePackConfig c = config;
     if (c == null || !c.enabled() || !c.deliveryEnabled()) return;
 
-    if (isBedrockPlayer(player)) {
-      debug("Player " + player.getName() + " is Bedrock/Floodgate; Java resource pack skipped.");
-      return;
-    }
 
     if (c.publicUrl().isBlank() || !host.running()) {
       warnOnce("delivery-host", "[ImperialResourcePack] Java delivery skipped: hosting is offline or public-url is empty.");
@@ -237,6 +233,16 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     return out.toString().trim();
   }
 
+  String statusMessage() {
+    ActivePack active = manager.active();
+    return "enabled=" + config.enabled()
+        + ", delivery=" + config.deliveryEnabled()
+        + ", hosting=" + host.running()
+        + ", active=" + (active == null ? "none" : active.file().getFileName())
+        + ", cache=" + manager.cacheSize()
+        + ", packs=" + manager.listAll(packsDirectory()).size();
+  }
+
   String statsMessage() {
     return "sent=" + stats.sentCount()
         + ", accepted=" + stats.acceptedCount()
@@ -267,10 +273,6 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     Player player = Bukkit.getPlayerExact(name);
     if (player == null) {
       sender.sendMessage("[IRP] Player not found or offline: " + name);
-      return;
-    }
-    if (isBedrockPlayer(player)) {
-      sender.sendMessage("[IRP] Player=" + player.getName() + " | Floodgate=true | Java pack=SKIPPED");
       return;
     }
     Selection selection = select(player);
@@ -375,17 +377,6 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       var entry = zip.getEntry("pack.mcmeta");
       return entry != null && !entry.isDirectory();
     } catch (IOException e) {
-      return false;
-    }
-  }
-
-  private boolean isBedrockPlayer(Player player) {
-    try {
-      Class<?> apiClass = Class.forName("org.geysermc.floodgate.api.FloodgateApi");
-      Object api = apiClass.getMethod("getInstance").invoke(null);
-      Object result = apiClass.getMethod("isFloodgatePlayer", UUID.class).invoke(api, player.getUniqueId());
-      return Boolean.TRUE.equals(result);
-    } catch (Throwable ignored) {
       return false;
     }
   }
