@@ -13,6 +13,7 @@ public final class ResourcePackManager {
   private final Logger logger;
   private final ResourcePackValidator validator = new ResourcePackValidator();
   private final Map<Path, CacheEntry> cache = new ConcurrentHashMap<>();
+  private volatile Map<String, Path> routeCache = Map.of();
   private volatile ActivePack active;
   private volatile String lastScanNotice = "";
 
@@ -23,6 +24,7 @@ public final class ResourcePackManager {
     try {
       Files.createDirectories(directory);
       List<Path> zips = listZipFiles(directory);
+      rebuildRouteCache(directory);
       Path selected = null;
       if (!config.activePack().isBlank()) {
         ResolutionResult resolution = resolvePath(directory, config.activePack(), config);
@@ -178,6 +180,8 @@ public final class ResourcePackManager {
     Optional<SorterResolver.Route> routed = SorterResolver.resolve(version);
     if (routed.isPresent()) {
       String routedFile = routed.get().file();
+      Path indexed = routeCache.get(version);
+      if (indexed != null && isZipFile(indexed)) return indexed;
 
       Path exact = safeChild(directory, routedFile);
       if (isZipFile(exact)) return exact;
@@ -219,6 +223,19 @@ public final class ResourcePackManager {
 
   public Optional<SorterResolver.Route> route(String version) {
     return SorterResolver.resolve(version);
+  }
+
+  public String expectedRouteFile(String version) {
+    return SorterResolver.resolve(version).map(r -> basename(r.file())).orElse("");
+  }
+
+  public void rebuildRouteCache(Path directory) {
+    Map<String, Path> next = new HashMap<>();
+    for (SorterResolver.Route route : SorterResolver.routes()) {
+      List<Path> matches = findPacksByBasename(directory, basename(route.file()));
+      if (matches.size() == 1) next.put(route.range(), matches.getFirst());
+    }
+    routeCache = Map.copyOf(next);
   }
 
   public AuditReport audit(Path directory, ResourcePackConfig config) {
