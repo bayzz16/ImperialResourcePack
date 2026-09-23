@@ -192,25 +192,15 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
   }
 
   String openUseMenu(org.bukkit.command.CommandSender sender) {
-    if (!(sender instanceof Player player)) {
-      sender.sendMessage("[IRP] Console: use /irp use <file-or-version>.");
-      return "";
-    }
-    player.sendMessage(Component.text("§6§lImperialResourcePack §8» §fChoose a Java pack:"));
-    for (ResourcePackManager.VersionMapping mapping : manager.versionMappings(packsDirectory())) {
-      Component line = Component.text("§e▶ §f" + mapping.label() + " §7→ §b" + mapping.file().getFileName())
-          .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand(
-              "/irp use " + mapping.file().getFileName()));
-      player.sendMessage(line);
-    }
+    sender.sendMessage("[IRP] Use /irp use <version> to choose your private pack. Example: /irp use 1.21.5");
+    sender.sendMessage("[IRP] Your choice is saved and restored when you rejoin.");
     return "";
   }
 
+
   String pathsMessage() {
     Path dir = packsDirectory().toAbsolutePath().normalize();
-    int total = manager.listAll(dir).size();
     return "Pack directory: " + dir
-        + "\nZIP detected: " + total
         + "\nHosting: " + (config.publicUrl().isBlank() ? "MISSING" : config.publicUrl());
   }
 
@@ -335,18 +325,9 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
       config = loaded;
       manager.scan(packs, loaded);
-      manager.rebuildRouteCache(packs);
-      inventoryFingerprint = manager.inventoryFingerprint(packs);
       host.start(loaded, worker, packs);
       warnPublicUrl(loaded, packs);
       configureAutoReload();
-
-      worker.submit(() -> {
-        manager.rebuildRouteCache(packs);
-        manager.prewarm(packs, loaded);
-        ResourcePackManager.AuditReport report = manager.audit(packs, loaded);
-        getServer().getScheduler().runTask(this, () -> logAudit(report, packs));
-      });
 
       return "Reload complete. Active=" +
           (manager.active() == null ? "none" : manager.active().file().getFileName())
