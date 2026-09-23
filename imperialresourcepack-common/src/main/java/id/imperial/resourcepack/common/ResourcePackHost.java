@@ -135,6 +135,14 @@ public final class ResourcePackHost implements AutoCloseable {
     return publicUrl + separator + "pack=" + URLEncoder.encode(filename, StandardCharsets.UTF_8);
   }
 
+  public synchronized String diagnostic() {
+    if (!config.hostingEnabled()) return "Hosting: disabled";
+    if (server == null) return "Hosting: OFFLINE (failed to bind " + config.bind() + ":" + config.port() + ")";
+    return "Hosting: ONLINE | bind=" + config.bind() + ":" + config.port()
+        + " | path=" + config.hostPath()
+        + " | public-url=" + (config.publicUrl().isBlank() ? "MISSING" : config.publicUrl());
+  }
+
   public synchronized boolean running() { return server != null; }
 
   public synchronized void close() {
