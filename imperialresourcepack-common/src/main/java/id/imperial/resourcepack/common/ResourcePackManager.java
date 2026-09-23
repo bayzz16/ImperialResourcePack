@@ -77,10 +77,13 @@ public final class ResourcePackManager {
   public ActivationResult prepare(Path selected, Path directory, ResourcePackConfig config) {
     try {
       if (selected == null) return ActivationResult.failure("Resource pack file was not found in packs-directory.");
-      Path file = safeChild(directory, selected.toAbsolutePath().normalize().startsWith(directory.toAbsolutePath().normalize())
-          ? directory.toAbsolutePath().normalize().relativize(selected.toAbsolutePath().normalize()).toString()
-          : selected.getFileName().toString());
-      if (file == null || !Files.isRegularFile(file)) {
+      // The resolver may return a real file discovered recursively inside packs/.
+      // Re-resolving that absolute path through safeChild() can incorrectly reject
+      // valid nested/normalized paths on some filesystems. Validate the canonical
+      // normalized path directly instead.
+      Path root = directory.toAbsolutePath().normalize();
+      Path file = selected.toAbsolutePath().normalize();
+      if (!file.startsWith(root) || !Files.isRegularFile(file)) {
         return ActivationResult.failure("Resource pack file was not found in packs-directory.");
       }
       ResourcePackValidator.ValidationResult validation =
