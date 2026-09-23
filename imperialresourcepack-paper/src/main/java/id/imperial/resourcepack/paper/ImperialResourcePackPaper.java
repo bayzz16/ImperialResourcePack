@@ -12,6 +12,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,7 +33,9 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
   private ResourcePackStats stats;
   private volatile ResourcePackConfig config;
   private volatile String inventoryFingerprint = "";
-  private final ConcurrentMap<UUID, ActivePack> playerPacks = new ConcurrentHashMap<>();
+  /** Persistent per-player pack preference: UUID -> pack filename. */
+  private final ConcurrentMap<UUID, String> playerPackPreferences = new ConcurrentHashMap<>();
+  private Path playerPreferencesFile;
   private BukkitTask autoReloadTask;
 
   @Override
@@ -41,6 +44,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     host = new ResourcePackHost(manager, getLogger());
     stats = new ResourcePackStats();
     reload();
+    loadPlayerPreferences();
     getServer().getPluginManager().registerEvents(this, this);
 
     var command = Objects.requireNonNull(getCommand("irp"));
@@ -67,7 +71,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   @EventHandler
   public void quit(PlayerQuitEvent event) {
-    playerPacks.remove(event.getPlayer().getUniqueId());
+    // Preference is intentionally kept; it must survive reconnects.
   }
 
   @EventHandler
@@ -84,7 +88,8 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   void send(Player player) {
     ResourcePackConfig c = config;
-    ActivePack selected = manager.active();
+    ActivePack selected = resolvePlayerPack(player.getUniqueId());
+    if (selected == null) selected = manager.active();
     if (c == null || selected == null || !c.enabled() || !c.deliveryEnabled()
         || c.publicUrl().isBlank() || !host.running()) {
       return;
@@ -125,7 +130,8 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     if (!result.success()) return "Pack was NOT changed: " + result.message();
 
     if (sender instanceof Player player) {
-      playerPacks.put(player.getUniqueId(), result.pack());
+      playerPackPreferences.put(player.getUniqueId(), result.pack().file().getFileName().toString());
+      savePlayerPreferences();
       getServer().getScheduler().runTask(this, () -> send(player));
       return "Your private Active Pack is now " + result.pack().file().getFileName()
           + ". Other Java players are unchanged.";
@@ -138,6 +144,51 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     applyToOnlinePlayers();
     return "Main Active Pack changed to " + global.pack().file().getFileName()
         + ". Players without a private override will receive it.";
+  }
+
+  private ActivePack resolvePlayerPack(UUID uuid) {
+    String filename = playerPackPreferences.get(uuid);
+    if (filename == null || filename.isBlank()) return null;
+    ResourcePackManager.ResolutionResult resolution =
+        manager.resolveValidDetailed(packsDirectory(), filename, config);
+    if (!resolution.success()) {
+      getLogger().warning("[ImperialResourcePack] Saved player pack '" + filename
+          + "' for " + uuid + " is unavailable; using Main Active Pack.");
+      return null;
+    }
+    var prepared = manager.prepare(resolution.file(), packsDirectory(), config);
+    return prepared.success() ? prepared.pack() : null;
+  }
+
+  private void loadPlayerPreferences() {
+    playerPreferencesFile = getDataFolder().toPath().resolve("player-packs.yml");
+    if (Files.notExists(playerPreferencesFile)) return;
+    YamlConfiguration yaml = YamlConfiguration.loadConfiguration(playerPreferencesFile.toFile());
+    var section = yaml.getConfigurationSection("players");
+    if (section == null) return;
+    for (String key : section.getKeys(false)) {
+      try {
+        UUID uuid = UUID.fromString(key);
+        String file = section.getString(key);
+        if (file != null && !file.isBlank()) playerPackPreferences.put(uuid, file);
+      } catch (IllegalArgumentException ignored) { }
+    }
+  }
+
+  private synchronized void savePlayerPreferences() {
+    try {
+      if (playerPreferencesFile == null) {
+        playerPreferencesFile = getDataFolder().toPath().resolve("player-packs.yml");
+      }
+      Files.createDirectories(playerPreferencesFile.getParent());
+      YamlConfiguration yaml = new YamlConfiguration();
+      for (var entry : playerPackPreferences.entrySet()) {
+        yaml.set("players." + entry.getKey(), entry.getValue());
+      }
+      yaml.save(playerPreferencesFile.toFile());
+    } catch (IOException e) {
+      getLogger().warning("[ImperialResourcePack] Could not save player-packs.yml: " + e.getMessage());
+    }
   }
 
   String openUseMenu(org.bukkit.command.CommandSender sender) {
