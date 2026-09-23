@@ -85,7 +85,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
     // Simple/manual mode: the configured active pack is sent to every Java player.
     // /irp use <filename> changes the active pack and immediately updates online players.
-    String url = ResourcePackHost.urlForPack(c.publicUrl(), selected.file().getFileName().toString());
+    String url = c.publicUrl();
 
     getLogger().info("[ImperialResourcePack] Client=" + player.getName()
         + ", sending active pack=" + selected.file().getFileName());
