@@ -1,0 +1,34 @@
+ImperialResourcePack 1.2.0
+============================
+
+Build verification:
+- mvn clean test: PASS
+- mvn clean package: PASS
+- Paper artifact verification: PASS
+- Velocity artifact verification: PASS
+- API isolation verification: PASS
+
+Routing tests:
+- 27/27 declared Java routes: PASS
+- 1.8.9: PASS
+- 1.14.4: PASS
+- 1.20.4: PASS
+- 1.21.1: PASS
+- 1.21.4: PASS
+- 1.21.8: PASS
+- 1.21.9: PASS
+- 1.21.10: PASS
+- 1.21.11: PASS
+- 26.2: PASS
+- 26.3: PASS
+
+Resolution/security tests:
+- root ZIP: PASS
+- nested ZIP discovery: PASS
+- duplicate basename rejection: PASS
+- corrupt/missing pack.mcmeta validation: PASS
+- protocol routing including 26.3: PASS
+- Java-only implementation: PASS
+
+GitHub Actions run: 97
+Commit before release packaging: edbf611733f12173075f4598438fc959ecd98327
