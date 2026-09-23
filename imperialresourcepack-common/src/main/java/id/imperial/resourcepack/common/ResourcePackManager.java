@@ -158,8 +158,17 @@ public final class ResourcePackManager {
 
     Optional<SorterResolver.Route> routed = SorterResolver.resolve(version);
     if (routed.isPresent()) {
-      Path mapped = safeChild(directory, routed.get().file());
+      String routedFile = routed.get().file();
+      Path mapped = safeChild(directory, routedFile);
       if (mapped != null && Files.isRegularFile(mapped)) return mapped;
+
+      // The sorter manifest may contain its original subfolder layout while
+      // server owners commonly keep all ZIPs directly under packs/. If the
+      // exact routed path is absent, safely resolve the unique matching ZIP
+      // by basename. This keeps per-player routing automatic without forcing
+      // a specific folder structure.
+      Path flattened = findUniquePack(directory, routedFile);
+      if (flattened != null && Files.isRegularFile(flattened)) return flattened;
     }
 
     Path exact = safeChild(directory, "ResourcePack-" + version + ".zip");
