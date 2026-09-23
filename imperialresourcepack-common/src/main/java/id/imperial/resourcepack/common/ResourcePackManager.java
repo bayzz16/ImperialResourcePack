@@ -57,7 +57,9 @@ public final class ResourcePackManager {
   public ActivationResult prepare(Path selected, Path directory, ResourcePackConfig config) {
     try {
       if (selected == null) return ActivationResult.failure("Resource pack file was not found in packs-directory.");
-      Path file = safeChild(directory, selected.getFileName().toString());
+      Path file = safeChild(directory, selected.toAbsolutePath().normalize().startsWith(directory.toAbsolutePath().normalize())
+          ? directory.toAbsolutePath().normalize().relativize(selected.toAbsolutePath().normalize()).toString()
+          : selected.getFileName().toString());
       if (file == null || !Files.isRegularFile(file)) {
         return ActivationResult.failure("Resource pack file was not found in packs-directory.");
       }
@@ -127,6 +129,12 @@ public final class ResourcePackManager {
   public Path versionPack(Path directory, String version) {
     if (version == null || version.isBlank()) return null;
 
+    Optional<SorterResolver.Route> routed = SorterResolver.resolve(version);
+    if (routed.isPresent()) {
+      Path mapped = safeChild(directory, routed.get().file());
+      if (mapped != null && Files.isRegularFile(mapped)) return mapped;
+    }
+
     Path exact = safeChild(directory, "ResourcePack-" + version + ".zip");
     if (exact != null && Files.isRegularFile(exact)) return exact;
 
@@ -135,6 +143,10 @@ public final class ResourcePackManager {
 
     try {
       List<VersionRangePack> matches = new ArrayList<>();
+      if (routed.isPresent()) {
+        Path mapped = safeChild(directory, routed.get().file());
+        if (mapped != null && Files.isRegularFile(mapped)) return mapped;
+      }
       for (Path file : listZipFiles(directory)) {
         VersionRangePack range = VersionRangePack.parse(file);
         if (range != null && range.contains(requested)) matches.add(range);
@@ -255,8 +267,8 @@ public final class ResourcePackManager {
   private static Path safeChild(Path directory, String name) {
     if (name == null || name.isBlank()) return null;
     Path root = directory.toAbsolutePath().normalize();
-    Path file = directory.resolve(name).normalize();
-    return file.getParent() != null && file.getParent().toAbsolutePath().normalize().equals(root) ? file : null;
+    Path file = directory.resolve(name.replace('\\', '/')).normalize();
+    return file.startsWith(root) ? file : null;
   }
 
   private static byte[] sha1(Path file) throws IOException {
