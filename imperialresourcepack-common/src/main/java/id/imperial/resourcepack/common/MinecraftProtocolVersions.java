@@ -77,6 +77,7 @@ public final class MinecraftProtocolVersions {
       // Newer protocol generations already represented by the sorter manifest.
       case 775 -> List.of("26.1.2", "26.1");
       case 776 -> List.of("26.2");
+      case 777 -> List.of("26.3");
 
       default -> List.of();
     };
