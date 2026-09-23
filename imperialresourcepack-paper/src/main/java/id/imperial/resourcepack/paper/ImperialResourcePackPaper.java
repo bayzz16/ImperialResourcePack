@@ -72,12 +72,12 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   void send(Player player) {
     ResourcePackConfig c = config;
-    ActivePack fallback = manager.active();
-    if (c == null || fallback == null || c.publicUrl().isBlank() || !host.running()) return;
+    if (c == null || c.publicUrl().isBlank() || !host.running()) return;
 
+    ActivePack fallback = manager.active();
     int protocol = player.getProtocolVersion();
-    ActivePack selected = fallback;
-    String detected = "fallback";
+    ActivePack selected = null;
+    String detected = "none";
     if (c.versionMapping()) {
       for (String version : MinecraftProtocolVersions.versionsFor(protocol)) {
         Path file = manager.versionPack(packsDirectory(), version);
@@ -93,7 +93,18 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       }
     }
 
-    if (c.versionMapping() && "fallback".equals(detected) && !c.fallbackToActive()) {
+    if (selected == null && fallback != null && c.fallbackToActive()) {
+      selected = fallback;
+      detected = "fallback";
+    }
+
+    if (selected == null) {
+      getLogger().warning("[ImperialResourcePack] No resource pack available for protocol " + protocol
+          + ". Add the mapped ZIP or configure a valid active-pack.");
+      return;
+    }
+
+    if (c.versionMapping() && "none".equals(detected) && !c.fallbackToActive()) {
       getLogger().warning("[ImperialResourcePack] No mapped pack for protocol " + protocol
           + " and fallback is disabled.");
       return;
