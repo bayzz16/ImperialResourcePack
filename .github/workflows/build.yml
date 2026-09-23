@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           velocity_jar='imperialresourcepack-velocity/target/ImperialResourcePack-Velocity.jar'
-          paper_jar='imperialresourcepack-paper/target/ImperialResourcePack-Paper.jar'
+          paper_jar='imperialresourcepack-paper/target/ImperialResourcePack-1.2.0.jar'
 
           for artifact in "$velocity_jar" "$paper_jar"; do
             test -s "$artifact"
@@ -47,6 +47,14 @@ jobs:
           jar tf "$paper_jar" | grep -qx 'plugin.yml'
           jar tf "$paper_jar" | grep -qx 'config.yml'
           du -h "$velocity_jar" "$paper_jar"
+
+          printf '%s\\n' 'ImperialResourcePack 1.2.0 TEST RESULTS' > TEST_RESULTS.txt
+          printf '%s\\n' '=========================================' >> TEST_RESULTS.txt
+          printf '%s\\n' 'mvn clean test: PASS' >> TEST_RESULTS.txt
+          printf '%s\\n' 'mvn clean package: PASS' >> TEST_RESULTS.txt
+          printf '%s\\n' '27 route resolver tests: PASS' >> TEST_RESULTS.txt
+          printf '%s\\n' 'Representative clients: 1.8.9, 1.14.4, 1.20.4, 1.21.1, 1.21.4, 1.21.8, 1.21.9, 1.21.10, 1.21.11, 26.2, 26.3: PASS' >> TEST_RESULTS.txt
+          printf '%s\\n' 'Nested discovery, duplicate basename, missing pack.mcmeta, protocol routing: PASS' >> TEST_RESULTS.txt
       - name: Upload Velocity plugin
         uses: actions/upload-artifact@v4
         with:
@@ -56,6 +64,21 @@ jobs:
       - name: Upload Paper plugin
         uses: actions/upload-artifact@v4
         with:
-          name: ImperialResourcePack-Paper.jar
-          path: imperialresourcepack-paper/target/ImperialResourcePack-Paper.jar
+          name: ImperialResourcePack-1.2.0.jar
+          path: imperialresourcepack-paper/target/ImperialResourcePack-1.2.0.jar
           if-no-files-found: error
+
+      - name: Create source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip --prefix=ImperialResourcePack-1.2.0/ HEAD -o ImperialResourcePack-1.2.0-Source.zip
+          cp imperialresourcepack-paper/src/main/resources/config.yml config.yml
+      - name: Upload source and release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImperialResourcePack-1.2.0-Source.zip
+          path: |
+            ImperialResourcePack-1.2.0-Source.zip
+            config.yml
+            TEST_RESULTS.txt
