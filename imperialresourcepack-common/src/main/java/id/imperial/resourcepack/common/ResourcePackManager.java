@@ -12,6 +12,7 @@ public final class ResourcePackManager {
   private final Logger logger;
   private final ResourcePackValidator validator = new ResourcePackValidator();
   private volatile ActivePack active;
+  private String lastScanNotice = "";
 
   public ResourcePackManager(Logger logger) { this.logger = logger; }
   public ActivePack active() { return active; }
@@ -21,17 +22,30 @@ public final class ResourcePackManager {
       Files.createDirectories(directory);
       List<Path> zips = listZipFiles(directory);
       Path selected = null;
-      if (!config.activePack().isBlank()) selected = safeChild(directory, config.activePack());
-      else if (zips.size() == 1) selected = zips.getFirst();
-      else if (zips.size() > 1) {
-        logger.warning("[ImperialResourcePack] Multiple ZIP files found; set active-pack explicitly.");
+      if (!config.activePack().isBlank()) {
+        selected = safeChild(directory, config.activePack());
+        if (selected == null || !Files.isRegularFile(selected)) {
+          notifyScan("configured-missing",
+              "[ImperialResourcePack] active-pack points to a missing file: " + config.activePack());
+          return active;
+        }
+      } else if (zips.size() == 1) {
+        selected = zips.getFirst();
+      } else if (zips.size() > 1) {
+        notifyScan("multiple",
+            "[ImperialResourcePack] Multiple ZIP files found; set active-pack explicitly. "
+                + "Version routing can still select mapped packs automatically.");
         return active;
       } else {
-        logger.warning("[ImperialResourcePack] No resource pack ZIP found in " + directory);
+        notifyScan("empty",
+            "[ImperialResourcePack] No resource pack ZIP found. Resource-pack delivery is idle until a pack is added.");
         return active;
       }
+      lastScanNotice = "";
       ActivationResult result = activate(selected, directory, config);
-      if (!result.success()) logger.severe("[ImperialResourcePack] ERROR: " + result.message());
+      if (!result.success()) {
+        notifyScan("activation-failed", "[ImperialResourcePack] ERROR: " + result.message());
+      }
       return active;
     } catch (IOException e) {
       logger.severe("[ImperialResourcePack] Cannot scan packs: " + e.getMessage());
@@ -98,6 +112,13 @@ public final class ResourcePackManager {
       return listZipFiles(directory);
     } catch (IOException e) {
       return List.of();
+    }
+  }
+
+  private void notifyScan(String state, String message) {
+    if (!state.equals(lastScanNotice)) {
+      logger.warning(message);
+      lastScanNotice = state;
     }
   }
 
@@ -251,11 +272,12 @@ public final class ResourcePackManager {
 
   private static List<Path> listZipFiles(Path directory) throws IOException {
     Files.createDirectories(directory);
-    try (var stream = Files.list(directory)) {
+    try (var stream = Files.walk(directory)) {
       return stream
           .filter(Files::isRegularFile)
           .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip"))
-          .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+          .sorted(Comparator.comparing(p -> directory.toAbsolutePath().normalize()
+              .relativize(p.toAbsolutePath().normalize()).toString()))
           .toList();
     }
   }
