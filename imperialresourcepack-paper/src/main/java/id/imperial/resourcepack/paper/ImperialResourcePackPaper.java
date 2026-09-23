@@ -304,18 +304,17 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       sender.sendMessage("[IRP] Player not found or offline: " + name);
       return;
     }
-    Selection selection = select(player);
-    String url = selection.pack() == null ? "N/A" : ResourcePackHost.urlForPack(config.publicUrl(),
-        packsDirectory().relativize(selection.pack().file().toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/'));
+    ActivePack pack = resolvePlayerPack(player.getUniqueId());
+    if (pack == null) pack = manager.active();
+    String url = pack == null ? "N/A" : ResourcePackHost.urlForPack(config.publicUrl(),
+        packsDirectory().relativize(pack.file().toAbsolutePath().normalize()).toString()
+            .replace(java.io.File.separatorChar, '/'));
     sender.sendMessage("[IRP] Player=" + player.getName()
-        + " | protocol=" + selection.protocol()
-        + " | version=" + selection.version()
-        + " | Floodgate=false"
-        + " | route=" + (selection.route() == null ? "NONE" : selection.route().range())
-        + " | pack=" + (selection.pack() == null ? "NONE" : selection.pack().file().getFileName())
+        + " | privatePack=" + (playerPackPreferences.getOrDefault(player.getUniqueId(), "NONE"))
+        + " | effectivePack=" + (pack == null ? "NONE" : pack.file().getFileName())
         + " | URL=" + url
-        + " | SHA-1=" + (selection.pack() == null ? "N/A" : selection.pack().sha1Hex())
-        + " | status=" + (selection.pack() == null ? selection.reason() : "READY"));
+        + " | SHA-1=" + (pack == null ? "N/A" : pack.sha1Hex())
+        + " | status=" + (pack == null ? "NONE" : "READY"));
   }
 
   String reload() {
