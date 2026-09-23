@@ -93,7 +93,7 @@ public final class ImperialResourcePackVelocity {
     String detected = "fallback";
 
     if (c.versionMapping()) {
-      for (String version : MinecraftProtocolVersions.versionsFor(protocol)) {
+      for (String version : pv.getVersionsSupportedBy()) {
         Path file = manager.versionPack(packsDirectory(), version);
         if (file == null) continue;
         var prepared = manager.prepare(file, packsDirectory(), c);
@@ -113,7 +113,8 @@ public final class ImperialResourcePackVelocity {
       return;
     }
 
-    String url = ResourcePackHost.urlForPack(c.publicUrl(), selected.file().getFileName().toString());
+    String packPath = packsDirectory().relativize(selected.file().toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/');
+    String url = ResourcePackHost.urlForPack(c.publicUrl(), packPath);
     logger.info("[ImperialResourcePack] Client=" + player.getUsername()
         + " protocol=" + protocol + ", detected-version=" + detected
         + ", sending=" + selected.file().getFileName());
