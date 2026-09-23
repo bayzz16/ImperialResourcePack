@@ -143,10 +143,6 @@ public final class ResourcePackManager {
 
     try {
       List<VersionRangePack> matches = new ArrayList<>();
-      if (routed.isPresent()) {
-        Path mapped = safeChild(directory, routed.get().file());
-        if (mapped != null && Files.isRegularFile(mapped)) return mapped;
-      }
       for (Path file : listZipFiles(directory)) {
         VersionRangePack range = VersionRangePack.parse(file);
         if (range != null && range.contains(requested)) matches.add(range);
