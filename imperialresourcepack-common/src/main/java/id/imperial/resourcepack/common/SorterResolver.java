@@ -61,15 +61,7 @@ public final class SorterResolver {
     new Route("26.3","1_Resource_Pack_Java/02_Modern_1.21.4-26.3/GUI(26.3).zip","cb44527278f3e411105c05acfbec977414fd7087","b56a394fcffc6ed000408150110aafc0ee4bfb4f76809ad2273b2529758af133",3110584,"modern_item_definition","ViaVersion/ViaBackwards",null,97,1)
   );
 
-  private static final BedrockRoute BEDROCK = new BedrockRoute(
-      "2_Resource_Pack_Bedrock/Imperial_X_SOL_Bedrock_V11.mcpack",
-      "26.30-26.51",
-      "26.2",
-      "Current Geyser does not support older Bedrock clients."
-  );
-
   public static List<Route> routes() { return ROUTES; }
-  public static BedrockRoute bedrock() { return BEDROCK; }
 
   public static Optional<Route> resolve(String rawVersion) {
     if (rawVersion == null || rawVersion.isBlank()) return Optional.empty();
