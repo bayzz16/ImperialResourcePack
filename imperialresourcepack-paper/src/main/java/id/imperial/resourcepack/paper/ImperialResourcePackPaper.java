@@ -99,7 +99,8 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
       return;
     }
 
-    String url = ResourcePackHost.urlForPack(c.publicUrl(), selected.file().getFileName().toString());
+    String packPath = packsDirectory().relativize(selected.file().toAbsolutePath().normalize()).toString().replace(java.io.File.separatorChar, '/');
+    String url = ResourcePackHost.urlForPack(c.publicUrl(), packPath);
     getLogger().info("[ImperialResourcePack] Client=" + player.getName()
         + " protocol=" + protocol + ", detected-version=" + detected
         + ", sending=" + selected.file().getFileName());
