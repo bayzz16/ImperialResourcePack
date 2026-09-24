@@ -7,7 +7,7 @@ commands:
   irp:
     description: "ImperialResourcePack Java resource-pack manager"
     usage: "/irp <use|list|info|reload|validate|status|diagnose|paths|rescan|player|stats|profile>"
-    permission: "imperialresourcepack.admin"
+    permission: "imperialresourcepack.use"
 permissions:
   imperialresourcepack.admin:
     description: Full ImperialResourcePack administration access.
@@ -19,7 +19,7 @@ permissions:
     description: List available resource packs.
     default: op
   imperialresourcepack.use:
-    description: Select and activate a resource pack.
+    description: Select a personal resource pack for the executing Java player.
     default: op
   imperialresourcepack.info:
     description: View active resource pack information.
