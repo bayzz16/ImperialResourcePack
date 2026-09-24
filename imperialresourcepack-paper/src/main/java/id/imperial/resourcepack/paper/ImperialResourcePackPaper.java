@@ -119,6 +119,9 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
   }
 
   synchronized String use(org.bukkit.command.CommandSender sender, String value) {
+    if (!(sender instanceof Player player)) {
+      return "Only a Java player can use /irp use; console does not change Main Active Pack.";\n    }
+
     ResourcePackConfig c = config;
     ResourcePackManager.ResolutionResult resolution =
         manager.resolveValidDetailed(packsDirectory(), value, c);
@@ -127,20 +130,10 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
     var result = manager.prepare(resolution.file(), packsDirectory(), c);
     if (!result.success()) return "Pack was NOT changed: " + result.message();
 
-    if (sender instanceof Player player) {
-      playerPackStore.set(player.getUniqueId(), value);
-      getServer().getScheduler().runTask(this, () -> send(player));
-      return "Your private Active Pack is now " + result.pack().file().getFileName()
-          + ". Other Java players are unchanged.";
-    }
-
-    var global = manager.activate(resolution.file(), packsDirectory(), c);
-    if (!global.success()) return "Main Active Pack was NOT changed: " + global.message();
-
-    inventoryFingerprint = manager.inventoryFingerprint(packsDirectory());
-    applyToOnlinePlayers();
-    return "Main Active Pack changed to " + global.pack().file().getFileName()
-        + ". Players without a private override will receive it.";
+    playerPackStore.set(player.getUniqueId(), value);
+    getServer().getScheduler().runTask(this, () -> send(player));
+    return "Your private Active Pack is now " + result.pack().file().getFileName()
+        + ". Other Java players are unchanged.";
   }
 
   private ActivePack resolvePlayerPack(UUID uuid) {
