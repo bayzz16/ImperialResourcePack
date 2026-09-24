@@ -120,7 +120,8 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
   synchronized String use(org.bukkit.command.CommandSender sender, String value) {
     if (!(sender instanceof Player player)) {
-      return "Only a Java player can use /irp use; console does not change Main Active Pack.";\n    }
+      return "Only a Java player can use /irp use; console does not change Main Active Pack.";
+    }
 
     ResourcePackConfig c = config;
     ResourcePackManager.ResolutionResult resolution =
