@@ -291,6 +291,7 @@ public final class ImperialResourcePackPaper extends JavaPlugin implements Liste
 
       config = loaded;
       manager.scan(packs, loaded);
+      inventoryFingerprint = manager.inventoryFingerprint(packs);
       if (playerPackStore != null) playerPackStore.reload();
       host.start(loaded, worker, packs);
       warnPublicUrl(loaded, packs);
