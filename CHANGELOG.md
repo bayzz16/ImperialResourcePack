@@ -10,3 +10,10 @@
 - Added /irp paths, /irp diagnose, /irp rescan, and /irp player diagnostics.
 - Startup route audit for all 27 configured Java routes.
 - Removed unused Bedrock/Floodgate/Geyser route model from the Java-only plugin.
+
+## Unreleased - Per-player persistent packs
+- Added UUID-based player-packs.yml persistence for Java players.
+- /irp use <version> now prepares and sends only the executing player's selected pack without changing Main Active Pack.
+- JOIN restores the saved personal pack; unavailable personal packs fall back to Main Active Pack without deleting the preference.
+- Separated imperialresourcepack.use from admin-only subcommands.
+- Auto-reload continues to rescan/cache only and does not resend packs to online players.
